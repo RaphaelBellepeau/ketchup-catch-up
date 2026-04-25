@@ -153,6 +153,24 @@ export const memories: Memory[] = [
   },
 ];
 
+export type NegotiationSender = "you" | "marie" | "tom" | "system";
+
+export type NegotiationMessage = {
+  id: string;
+  sender: NegotiationSender;
+  content: string;
+  delay_ms: number;
+};
+
+export const negotiationMessages: NegotiationMessage[] = [
+  { id: "n1", sender: "you", content: "Looking for dinner, 27 Apr – 11 May", delay_ms: 600 },
+  { id: "n2", sender: "system", content: "Searching venues near Bastille…", delay_ms: 900 },
+  { id: "n3", sender: "marie", content: "Thu 1 May or Tue 6 May. She likes early dinners.", delay_ms: 1400 },
+  { id: "n4", sender: "tom", content: "Calling now…", delay_ms: 1200 },
+  { id: "n5", sender: "you", content: "Searching venues near Bastille…", delay_ms: 1100 },
+  { id: "n6", sender: "system", content: "Tavily · 4 places found", delay_ms: 900 },
+];
+
 export const feedbackSamples: Feedback[] = [
   {
     id: "fb-1",
