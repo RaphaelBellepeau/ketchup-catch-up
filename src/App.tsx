@@ -10,15 +10,15 @@ import Welcome from "./pages/onboarding/Welcome.tsx";
 import Sms from "./pages/onboarding/Sms.tsx";
 import VoiceCall from "./pages/onboarding/VoiceCall.tsx";
 import Permissions from "./pages/onboarding/Permissions.tsx";
+import Friends from "./pages/groups/Friends.tsx";
+import NameGroup from "./pages/groups/NameGroup.tsx";
+import FrequencyPage from "./pages/groups/FrequencyPage.tsx";
+import WindowPage from "./pages/groups/WindowPage.tsx";
 
 const queryClient = new QueryClient();
 
 const placeholderRoutes: { path: string; title: string }[] = [
   { path: "/home", title: "Home" },
-  { path: "/groups/new/friends", title: "Add friends" },
-  { path: "/groups/new/name", title: "Name your group" },
-  { path: "/groups/new/frequency", title: "How often?" },
-  { path: "/groups/new/window", title: "Pick a window" },
   { path: "/catchup/negotiating", title: "Negotiating" },
   { path: "/catchup/proposal", title: "Proposal" },
   { path: "/catchup/confirmed", title: "Confirmed" },
@@ -39,6 +39,10 @@ const App = () => (
           <Route path="/onboarding/sms" element={<Sms />} />
           <Route path="/onboarding/voice-call" element={<VoiceCall />} />
           <Route path="/onboarding/permissions" element={<Permissions />} />
+          <Route path="/groups/new/friends" element={<Friends />} />
+          <Route path="/groups/new/name" element={<NameGroup />} />
+          <Route path="/groups/new/frequency" element={<FrequencyPage />} />
+          <Route path="/groups/new/window" element={<WindowPage />} />
           {placeholderRoutes.map((r) => (
             <Route
               key={r.path}
