@@ -15,7 +15,6 @@ const queryClient = new QueryClient();
 
 const placeholderRoutes: { path: string; title: string }[] = [
   { path: "/home", title: "Home" },
-  { path: "/onboarding/permissions", title: "Permissions" },
   { path: "/groups/new/friends", title: "Add friends" },
   { path: "/groups/new/name", title: "Name your group" },
   { path: "/groups/new/frequency", title: "How often?" },
@@ -39,6 +38,7 @@ const App = () => (
           <Route path="/onboarding/welcome" element={<Welcome />} />
           <Route path="/onboarding/sms" element={<Sms />} />
           <Route path="/onboarding/voice-call" element={<VoiceCall />} />
+          <Route path="/onboarding/permissions" element={<Permissions />} />
           {placeholderRoutes.map((r) => (
             <Route
               key={r.path}
