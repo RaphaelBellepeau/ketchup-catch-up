@@ -1,12 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { RequireAuth } from "@/components/RequireAuth";
-import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
-import PlaceholderPage from "./pages/PlaceholderPage.tsx";
 import Welcome from "./pages/onboarding/Welcome.tsx";
 import Sms from "./pages/onboarding/Sms.tsx";
 import VoiceCall from "./pages/onboarding/VoiceCall.tsx";
@@ -25,8 +23,6 @@ import Memory from "./pages/Memory.tsx";
 
 const queryClient = new QueryClient();
 
-const placeholderRoutes: { path: string; title: string }[] = [];
-
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -34,7 +30,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Index />} />
+          <Route path="/" element={<Navigate to="/onboarding/welcome" replace />} />
           <Route path="/onboarding/welcome" element={<Welcome />} />
           <Route path="/onboarding/sms" element={<Sms />} />
           <Route path="/onboarding/voice-call" element={<RequireAuth><VoiceCall /></RequireAuth>} />
@@ -50,14 +46,6 @@ const App = () => (
           <Route path="/feedback/voice" element={<RequireAuth><FeedbackVoice /></RequireAuth>} />
           <Route path="/home" element={<RequireAuth><Home /></RequireAuth>} />
           <Route path="/memory" element={<RequireAuth><Memory /></RequireAuth>} />
-          {placeholderRoutes.map((r) => (
-            <Route
-              key={r.path}
-              path={r.path}
-              element={<PlaceholderPage title={r.title} path={r.path} />}
-            />
-          ))}
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

@@ -60,7 +60,7 @@ export const Layout = ({ children, hideStatusBar, className }: LayoutProps) => {
           className,
         )}
       >
-        {!hideStatusBar && <StatusBar />}
+        {hideStatusBar && <StatusBar />}
         <main className="flex-1 flex flex-col">{children}</main>
       </div>
     </div>
