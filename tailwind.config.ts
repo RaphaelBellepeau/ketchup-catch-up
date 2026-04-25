@@ -13,7 +13,32 @@ export default {
       },
     },
     extend: {
+      fontFamily: {
+        sans: ["Inter", "system-ui", "sans-serif"],
+      },
+      fontSize: {
+        h1: ["26px", { lineHeight: "1.2", fontWeight: "500" }],
+        h2: ["20px", { lineHeight: "1.3", fontWeight: "500" }],
+        h3: ["15px", { lineHeight: "1.4", fontWeight: "500" }],
+        body: ["13px", { lineHeight: "1.5", fontWeight: "400" }],
+        meta: ["11px", { lineHeight: "1.4", fontWeight: "500", letterSpacing: "0.08em" }],
+      },
       colors: {
+        // Ketchup brand palette
+        "ketchup-red": "#FF4B4B",
+        coral: "#FF7A59",
+        navy: "#0D1B2A",
+        charcoal: "#1F2937",
+        cream: "#FFF3E0",
+        mint: "#B6EAD7",
+        sky: "#E0F2FE",
+        lavender: "#E9D5FF",
+        sunshine: "#FFD166",
+        blush: "#FFE1E6",
+        "light-gray": "#E5E7EB",
+        slate: "#6B7280",
+
+        // Shadcn semantic tokens
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
@@ -59,31 +84,32 @@ export default {
         },
       },
       borderRadius: {
+        card: "16px",
+        btn: "14px",
+        field: "12px",
+        pill: "999px",
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
       keyframes: {
         "accordion-down": {
-          from: {
-            height: "0",
-          },
-          to: {
-            height: "var(--radix-accordion-content-height)",
-          },
+          from: { height: "0" },
+          to: { height: "var(--radix-accordion-content-height)" },
         },
         "accordion-up": {
-          from: {
-            height: "var(--radix-accordion-content-height)",
-          },
-          to: {
-            height: "0",
-          },
+          from: { height: "var(--radix-accordion-content-height)" },
+          to: { height: "0" },
+        },
+        "waveform-pulse": {
+          "0%, 100%": { transform: "scaleY(0.3)" },
+          "50%": { transform: "scaleY(1)" },
         },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        "waveform-pulse": "waveform-pulse 1s ease-in-out infinite",
       },
     },
   },
