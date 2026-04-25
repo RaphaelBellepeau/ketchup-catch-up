@@ -8,12 +8,12 @@ import NotFound from "./pages/NotFound.tsx";
 import PlaceholderPage from "./pages/PlaceholderPage.tsx";
 import Welcome from "./pages/onboarding/Welcome.tsx";
 import Sms from "./pages/onboarding/Sms.tsx";
+import VoiceCall from "./pages/onboarding/VoiceCall.tsx";
 
 const queryClient = new QueryClient();
 
 const placeholderRoutes: { path: string; title: string }[] = [
   { path: "/home", title: "Home" },
-  { path: "/onboarding/voice-call", title: "Voice call" },
   { path: "/onboarding/permissions", title: "Permissions" },
   { path: "/groups/new/friends", title: "Add friends" },
   { path: "/groups/new/name", title: "Name your group" },
@@ -37,6 +37,7 @@ const App = () => (
           <Route path="/" element={<Index />} />
           <Route path="/onboarding/welcome" element={<Welcome />} />
           <Route path="/onboarding/sms" element={<Sms />} />
+          <Route path="/onboarding/voice-call" element={<VoiceCall />} />
           {placeholderRoutes.map((r) => (
             <Route
               key={r.path}
