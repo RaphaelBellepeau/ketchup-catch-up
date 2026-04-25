@@ -5,8 +5,27 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
+import PlaceholderPage from "./pages/PlaceholderPage.tsx";
 
 const queryClient = new QueryClient();
+
+const placeholderRoutes: { path: string; title: string }[] = [
+  { path: "/home", title: "Home" },
+  { path: "/onboarding/welcome", title: "Welcome" },
+  { path: "/onboarding/sms", title: "Verify by SMS" },
+  { path: "/onboarding/voice-call", title: "Voice call" },
+  { path: "/onboarding/permissions", title: "Permissions" },
+  { path: "/groups/new/friends", title: "Add friends" },
+  { path: "/groups/new/name", title: "Name your group" },
+  { path: "/groups/new/frequency", title: "How often?" },
+  { path: "/groups/new/window", title: "Pick a window" },
+  { path: "/catchup/negotiating", title: "Negotiating" },
+  { path: "/catchup/proposal", title: "Proposal" },
+  { path: "/catchup/confirmed", title: "Confirmed" },
+  { path: "/feedback/rating", title: "Rate the catchup" },
+  { path: "/feedback/voice", title: "Leave a voice note" },
+  { path: "/memory", title: "Memory" },
+];
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -16,6 +35,13 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
+          {placeholderRoutes.map((r) => (
+            <Route
+              key={r.path}
+              path={r.path}
+              element={<PlaceholderPage title={r.title} path={r.path} />}
+            />
+          ))}
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
