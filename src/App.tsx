@@ -9,6 +9,7 @@ import PlaceholderPage from "./pages/PlaceholderPage.tsx";
 import Welcome from "./pages/onboarding/Welcome.tsx";
 import Sms from "./pages/onboarding/Sms.tsx";
 import VoiceCall from "./pages/onboarding/VoiceCall.tsx";
+import Permissions from "./pages/onboarding/Permissions.tsx";
 
 const queryClient = new QueryClient();
 
