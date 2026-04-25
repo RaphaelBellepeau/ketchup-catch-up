@@ -1,0 +1,14 @@
+.git/
+.venv/
+.env
+.env.local
+.claude/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+tests/
+*.md
+!pyproject.toml
