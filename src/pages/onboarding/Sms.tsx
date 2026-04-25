@@ -136,7 +136,7 @@ const Sms = () => {
           </p>
         </div>
 
-        <div className="mt-8 flex justify-center gap-3">
+        <div className="mt-8 flex justify-center gap-2">
           {digits.map((digit, index) => {
             const isActive = digit !== "" && index === digits.findIndex((d, i) => d !== "" && i === index);
             const isCurrentEmpty = digit === "" && digits.slice(0, index).every((d) => d !== "");
@@ -154,7 +154,7 @@ const Sms = () => {
                 onKeyDown={handleKeyDown(index)}
                 aria-label={`Digit ${index + 1}`}
                 className={cn(
-                  "h-16 w-16 rounded-input bg-cream text-navy text-h1 text-center font-medium",
+                  "h-14 w-12 rounded-input bg-cream text-navy text-h2 text-center font-medium",
                   "focus:outline-none border-2 transition-colors",
                   highlighted ? "border-ketchup-red text-ketchup-red" : "border-transparent",
                 )}
