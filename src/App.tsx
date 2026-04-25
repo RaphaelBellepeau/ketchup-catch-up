@@ -6,12 +6,12 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import PlaceholderPage from "./pages/PlaceholderPage.tsx";
+import Welcome from "./pages/onboarding/Welcome.tsx";
 
 const queryClient = new QueryClient();
 
 const placeholderRoutes: { path: string; title: string }[] = [
   { path: "/home", title: "Home" },
-  { path: "/onboarding/welcome", title: "Welcome" },
   { path: "/onboarding/sms", title: "Verify by SMS" },
   { path: "/onboarding/voice-call", title: "Voice call" },
   { path: "/onboarding/permissions", title: "Permissions" },
@@ -35,6 +35,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
+          <Route path="/onboarding/welcome" element={<Welcome />} />
           {placeholderRoutes.map((r) => (
             <Route
               key={r.path}
