@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.local
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.git/
+.claude/
+tests/
+.gcloudignore
+.gitignore
+.dockerignore
+CLAUDE.md
+*.md

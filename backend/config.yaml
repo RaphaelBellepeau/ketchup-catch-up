@@ -1,0 +1,13 @@
+llm:
+  model: "gemini-2.5-flash"
+
+tts:
+  padding_bonus: 0.0
+  rewrite_rules: "fr"
+
+stt:
+  flush_duration_s: 0.5
+
+session:
+  silence_timeout_s: 0.0
+  assistant_speaks_first: true
