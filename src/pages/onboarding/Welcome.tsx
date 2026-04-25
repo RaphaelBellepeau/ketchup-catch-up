@@ -4,16 +4,38 @@ import { Layout } from "@/components/Layout";
 import { Button } from "@/components/Button";
 import { Input } from "@/components/Input";
 import { BottleLogo } from "@/components/BottleLogo";
+import { supabase } from "@/lib/supabase";
+import { toast } from "@/hooks/use-toast";
+
+/** Normalize a phone number to E.164 (digits + leading +). */
+const toE164 = (raw: string) => {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  const hasPlus = trimmed.startsWith("+");
+  const digits = trimmed.replace(/\D/g, "");
+  return hasPlus ? `+${digits}` : digits ? `+${digits}` : "";
+};
 
 const Welcome = () => {
   const navigate = useNavigate();
   const [phone, setPhone] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const trimmed = phone.trim();
-    if (!trimmed) return;
-    navigate("/onboarding/sms", { state: { phone: trimmed } });
+    const e164 = toE164(phone);
+    if (!e164) return;
+    setSubmitting(true);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({ phone: e164 });
+      if (error) throw error;
+      navigate("/onboarding/sms", { state: { phone: e164 } });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not send code";
+      toast({ title: "Couldn't send code", description: message, variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -51,8 +73,8 @@ const Welcome = () => {
               onChange={(e) => setPhone(e.target.value)}
               aria-label="Phone number"
             />
-            <Button type="submit" variant="primary" size="lg" fullWidth>
-              Get a call from my agent
+            <Button type="submit" variant="primary" size="lg" fullWidth disabled={submitting}>
+              {submitting ? "Sending code…" : "Get a call from my agent"}
             </Button>
             <p className="text-meta normal-case tracking-normal text-slate text-center mt-1">
               No password. Just pick up.

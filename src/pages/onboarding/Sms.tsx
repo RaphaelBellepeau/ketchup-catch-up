@@ -3,7 +3,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/Button";
 import { cn } from "@/lib/utils";
-import { users } from "@/data/mockData";
+import { supabase } from "@/lib/supabase";
+import { toast } from "@/hooks/use-toast";
 
 const CODE_LENGTH = 4;
 const RESEND_SECONDS = 24;
@@ -26,6 +27,7 @@ const Sms = () => {
 
   const [digits, setDigits] = useState<string[]>(() => Array(CODE_LENGTH).fill(""));
   const [seconds, setSeconds] = useState(RESEND_SECONDS);
+  const [verifying, setVerifying] = useState(false);
   const inputsRef = useRef<Array<HTMLInputElement | null>>([]);
 
   // Countdown timer
