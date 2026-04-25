@@ -7,12 +7,12 @@ import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import PlaceholderPage from "./pages/PlaceholderPage.tsx";
 import Welcome from "./pages/onboarding/Welcome.tsx";
+import Sms from "./pages/onboarding/Sms.tsx";
 
 const queryClient = new QueryClient();
 
 const placeholderRoutes: { path: string; title: string }[] = [
   { path: "/home", title: "Home" },
-  { path: "/onboarding/sms", title: "Verify by SMS" },
   { path: "/onboarding/voice-call", title: "Voice call" },
   { path: "/onboarding/permissions", title: "Permissions" },
   { path: "/groups/new/friends", title: "Add friends" },
@@ -36,6 +36,7 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/onboarding/welcome" element={<Welcome />} />
+          <Route path="/onboarding/sms" element={<Sms />} />
           {placeholderRoutes.map((r) => (
             <Route
               key={r.path}
