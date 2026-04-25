@@ -184,10 +184,10 @@ const Sms = () => {
           variant="primary"
           size="lg"
           fullWidth
-          disabled={!isComplete}
+          disabled={!isComplete || verifying}
           onClick={handleContinue}
         >
-          Continue
+          {verifying ? "Verifying…" : "Continue"}
         </Button>
       </div>
     </Layout>
