@@ -14,12 +14,12 @@ import Friends from "./pages/groups/Friends.tsx";
 import NameGroup from "./pages/groups/NameGroup.tsx";
 import FrequencyPage from "./pages/groups/FrequencyPage.tsx";
 import WindowPage from "./pages/groups/WindowPage.tsx";
+import Negotiating from "./pages/catchup/Negotiating.tsx";
 
 const queryClient = new QueryClient();
 
 const placeholderRoutes: { path: string; title: string }[] = [
   { path: "/home", title: "Home" },
-  { path: "/catchup/negotiating", title: "Negotiating" },
   { path: "/catchup/proposal", title: "Proposal" },
   { path: "/catchup/confirmed", title: "Confirmed" },
   { path: "/feedback/rating", title: "Rate the catchup" },
