@@ -87,18 +87,36 @@ const Sms = () => {
     }
   };
 
-  const handleResend = () => {
-    if (seconds > 0) return;
-    setDigits(Array(CODE_LENGTH).fill(""));
-    setSeconds(RESEND_SECONDS);
-    inputsRef.current[0]?.focus();
+  const handleResend = async () => {
+    if (seconds > 0 || !phone) return;
+    try {
+      const { error } = await supabase.auth.signInWithOtp({ phone });
+      if (error) throw error;
+      setDigits(Array(CODE_LENGTH).fill(""));
+      setSeconds(RESEND_SECONDS);
+      inputsRef.current[0]?.focus();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not resend code";
+      toast({ title: "Couldn't resend", description: message, variant: "destructive" });
+    }
   };
 
-  const handleContinue = () => {
-    if (!isComplete) return;
-    // TODO: replace with supabase.auth.verifyOtp on phase 6
-    const userId = users.you.id;
-    navigate("/onboarding/voice-call", { state: { userId, phone } });
+  const handleContinue = async () => {
+    if (!isComplete || verifying || !phone) return;
+    setVerifying(true);
+    try {
+      const token = digits.join("");
+      const { data, error } = await supabase.auth.verifyOtp({ phone, token, type: "sms" });
+      if (error) throw error;
+      const userId = data.user?.id;
+      if (!userId) throw new Error("No user returned");
+      navigate("/onboarding/voice-call", { state: { userId, phone } });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Invalid code";
+      toast({ title: "Verification failed", description: message, variant: "destructive" });
+    } finally {
+      setVerifying(false);
+    }
   };
 
   const formatTimer = (s: number) => {
