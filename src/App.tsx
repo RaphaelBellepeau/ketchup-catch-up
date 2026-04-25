@@ -43,6 +43,7 @@ const App = () => (
           <Route path="/groups/new/name" element={<NameGroup />} />
           <Route path="/groups/new/frequency" element={<FrequencyPage />} />
           <Route path="/groups/new/window" element={<WindowPage />} />
+          <Route path="/catchup/negotiating" element={<Negotiating />} />
           {placeholderRoutes.map((r) => (
             <Route
               key={r.path}
