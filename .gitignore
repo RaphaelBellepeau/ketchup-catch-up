@@ -12,10 +12,9 @@ dist
 dist-ssr
 *.local
 
-# Environment variables
-.env
-.env.*
-!.env.example
+# Environment variables — keep .env.local for secrets, .env is public config
+.env.local
+.env.*.local
 
 # Editor directories and files
 .vscode/*
