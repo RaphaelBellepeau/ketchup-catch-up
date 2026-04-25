@@ -3,6 +3,20 @@ import type { Config } from "tailwindcss";
 export default {
   darkMode: ["class"],
   content: ["./pages/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./app/**/*.{ts,tsx}", "./src/**/*.{ts,tsx}"],
+  safelist: [
+    "bg-ketchup-red",
+    "bg-coral",
+    "bg-navy",
+    "bg-charcoal",
+    "bg-cream",
+    "bg-mint",
+    "bg-sky",
+    "bg-lavender",
+    "bg-sunshine",
+    "bg-blush",
+    "bg-light-gray",
+    "bg-slate",
+  ],
   prefix: "",
   theme: {
     container: {
