@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { RequireAuth } from "@/components/RequireAuth";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import PlaceholderPage from "./pages/PlaceholderPage.tsx";
@@ -36,19 +37,19 @@ const App = () => (
           <Route path="/" element={<Index />} />
           <Route path="/onboarding/welcome" element={<Welcome />} />
           <Route path="/onboarding/sms" element={<Sms />} />
-          <Route path="/onboarding/voice-call" element={<VoiceCall />} />
-          <Route path="/onboarding/permissions" element={<Permissions />} />
-          <Route path="/groups/new/friends" element={<Friends />} />
-          <Route path="/groups/new/name" element={<NameGroup />} />
-          <Route path="/groups/new/frequency" element={<FrequencyPage />} />
-          <Route path="/groups/new/window" element={<WindowPage />} />
-          <Route path="/catchup/negotiating" element={<Negotiating />} />
-          <Route path="/catchup/proposal" element={<Proposal />} />
-          <Route path="/catchup/confirmed" element={<Confirmed />} />
-          <Route path="/feedback/rating" element={<Rating />} />
-          <Route path="/feedback/voice" element={<FeedbackVoice />} />
-          <Route path="/home" element={<Home />} />
-          <Route path="/memory" element={<Memory />} />
+          <Route path="/onboarding/voice-call" element={<RequireAuth><VoiceCall /></RequireAuth>} />
+          <Route path="/onboarding/permissions" element={<RequireAuth><Permissions /></RequireAuth>} />
+          <Route path="/groups/new/friends" element={<RequireAuth><Friends /></RequireAuth>} />
+          <Route path="/groups/new/name" element={<RequireAuth><NameGroup /></RequireAuth>} />
+          <Route path="/groups/new/frequency" element={<RequireAuth><FrequencyPage /></RequireAuth>} />
+          <Route path="/groups/new/window" element={<RequireAuth><WindowPage /></RequireAuth>} />
+          <Route path="/catchup/negotiating" element={<RequireAuth><Negotiating /></RequireAuth>} />
+          <Route path="/catchup/proposal" element={<RequireAuth><Proposal /></RequireAuth>} />
+          <Route path="/catchup/confirmed" element={<RequireAuth><Confirmed /></RequireAuth>} />
+          <Route path="/feedback/rating" element={<RequireAuth><Rating /></RequireAuth>} />
+          <Route path="/feedback/voice" element={<RequireAuth><FeedbackVoice /></RequireAuth>} />
+          <Route path="/home" element={<RequireAuth><Home /></RequireAuth>} />
+          <Route path="/memory" element={<RequireAuth><Memory /></RequireAuth>} />
           {placeholderRoutes.map((r) => (
             <Route
               key={r.path}
