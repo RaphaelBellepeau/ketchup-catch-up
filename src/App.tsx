@@ -17,13 +17,13 @@ import WindowPage from "./pages/groups/WindowPage.tsx";
 import Negotiating from "./pages/catchup/Negotiating.tsx";
 import Proposal from "./pages/catchup/Proposal.tsx";
 import Confirmed from "./pages/catchup/Confirmed.tsx";
+import Rating from "./pages/feedback/Rating.tsx";
+import FeedbackVoice from "./pages/feedback/Voice.tsx";
 
 const queryClient = new QueryClient();
 
 const placeholderRoutes: { path: string; title: string }[] = [
   { path: "/home", title: "Home" },
-  { path: "/feedback/rating", title: "Rate the catchup" },
-  { path: "/feedback/voice", title: "Leave a voice note" },
   { path: "/memory", title: "Memory" },
 ];
 
@@ -46,6 +46,8 @@ const App = () => (
           <Route path="/catchup/negotiating" element={<Negotiating />} />
           <Route path="/catchup/proposal" element={<Proposal />} />
           <Route path="/catchup/confirmed" element={<Confirmed />} />
+          <Route path="/feedback/rating" element={<Rating />} />
+          <Route path="/feedback/voice" element={<FeedbackVoice />} />
           {placeholderRoutes.map((r) => (
             <Route
               key={r.path}
