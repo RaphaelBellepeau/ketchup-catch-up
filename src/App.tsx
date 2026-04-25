@@ -19,13 +19,12 @@ import Proposal from "./pages/catchup/Proposal.tsx";
 import Confirmed from "./pages/catchup/Confirmed.tsx";
 import Rating from "./pages/feedback/Rating.tsx";
 import FeedbackVoice from "./pages/feedback/Voice.tsx";
+import Home from "./pages/Home.tsx";
+import Memory from "./pages/Memory.tsx";
 
 const queryClient = new QueryClient();
 
-const placeholderRoutes: { path: string; title: string }[] = [
-  { path: "/home", title: "Home" },
-  { path: "/memory", title: "Memory" },
-];
+const placeholderRoutes: { path: string; title: string }[] = [];
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -48,6 +47,8 @@ const App = () => (
           <Route path="/catchup/confirmed" element={<Confirmed />} />
           <Route path="/feedback/rating" element={<Rating />} />
           <Route path="/feedback/voice" element={<FeedbackVoice />} />
+          <Route path="/home" element={<Home />} />
+          <Route path="/memory" element={<Memory />} />
           {placeholderRoutes.map((r) => (
             <Route
               key={r.path}
