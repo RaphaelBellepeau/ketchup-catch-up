@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 import { toast } from "@/hooks/use-toast";
 
-const CODE_LENGTH = 4;
+const CODE_LENGTH = 6;
 const RESEND_SECONDS = 24;
 
 /** Mask a phone number like "+33 6 12 34 56 78" → "+33 6 12 …78". */
