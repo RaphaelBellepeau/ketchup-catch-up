@@ -15,13 +15,13 @@ import NameGroup from "./pages/groups/NameGroup.tsx";
 import FrequencyPage from "./pages/groups/FrequencyPage.tsx";
 import WindowPage from "./pages/groups/WindowPage.tsx";
 import Negotiating from "./pages/catchup/Negotiating.tsx";
+import Proposal from "./pages/catchup/Proposal.tsx";
+import Confirmed from "./pages/catchup/Confirmed.tsx";
 
 const queryClient = new QueryClient();
 
 const placeholderRoutes: { path: string; title: string }[] = [
   { path: "/home", title: "Home" },
-  { path: "/catchup/proposal", title: "Proposal" },
-  { path: "/catchup/confirmed", title: "Confirmed" },
   { path: "/feedback/rating", title: "Rate the catchup" },
   { path: "/feedback/voice", title: "Leave a voice note" },
   { path: "/memory", title: "Memory" },
@@ -44,6 +44,8 @@ const App = () => (
           <Route path="/groups/new/frequency" element={<FrequencyPage />} />
           <Route path="/groups/new/window" element={<WindowPage />} />
           <Route path="/catchup/negotiating" element={<Negotiating />} />
+          <Route path="/catchup/proposal" element={<Proposal />} />
+          <Route path="/catchup/confirmed" element={<Confirmed />} />
           {placeholderRoutes.map((r) => (
             <Route
               key={r.path}
