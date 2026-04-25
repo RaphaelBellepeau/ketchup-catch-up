@@ -39,6 +39,10 @@ const App = () => (
           <Route path="/onboarding/sms" element={<Sms />} />
           <Route path="/onboarding/voice-call" element={<VoiceCall />} />
           <Route path="/onboarding/permissions" element={<Permissions />} />
+          <Route path="/groups/new/friends" element={<Friends />} />
+          <Route path="/groups/new/name" element={<NameGroup />} />
+          <Route path="/groups/new/frequency" element={<FrequencyPage />} />
+          <Route path="/groups/new/window" element={<WindowPage />} />
           {placeholderRoutes.map((r) => (
             <Route
               key={r.path}
