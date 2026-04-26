@@ -29,6 +29,15 @@ function colorFor(key: string): string {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
+/** Maps avatar color tokens → vibrant bubble bg + label text color */
+const BUBBLE_STYLES: Record<string, { bg: string; label: string }> = {
+  coral:    { bg: "bg-[#FF6B6B]",  label: "text-[#FF6B6B]"  },
+  mint:     { bg: "bg-[#A8E6CF]",  label: "text-[#2DAA7E]"  },
+  sunshine: { bg: "bg-[#FFD166]",  label: "text-[#C99A00]"  },
+  lavender: { bg: "bg-[#D5B5FF]",  label: "text-[#8B5CF6]"  },
+  sky:      { bg: "bg-[#93C5FD]",  label: "text-[#3B82F6]"  },
+};
+
 function isSystemMsg(role: string): boolean {
   return role === "info" || role === "done" || role === "error";
 }
@@ -36,14 +45,27 @@ function isOrchestrator(name: string): boolean {
   return name === "orchestrator" || name === "system";
 }
 
-const Bubble = ({ msg }: { msg: NegotiationMessage }) => {
+/** Determine if this agent's bubble should come from the right side */
+function isUserAgent(name: string): boolean {
+  const n = name.toLowerCase();
+  return n === "you" || n === "user" || n === "me";
+}
+
+const Bubble = ({ msg, index }: { msg: NegotiationMessage; index: number }) => {
+  const staggerDelay = `${Math.min(index * 80, 400)}ms`;
+
   if (isOrchestrator(msg.agent_name) && isSystemMsg(msg.role)) {
     return (
-      <div className="w-full text-center my-1 animate-fade-in">
+      <div
+        className="w-full text-center my-1 animate-bubble-in-center"
+        style={{ animationDelay: staggerDelay }}
+      >
         <span
           className={cn(
-            "text-body italic",
-            msg.role === "error" ? "text-ketchup-red" : "text-slate",
+            "inline-block px-4 py-2 rounded-pill text-body italic",
+            msg.role === "error"
+              ? "text-ketchup-red bg-blush/60"
+              : "text-slate bg-light-gray/40",
           )}
         >
           {msg.content}
@@ -52,18 +74,36 @@ const Bubble = ({ msg }: { msg: NegotiationMessage }) => {
     );
   }
 
-  // Agent bubble (someone else's agent — left aligned, color-keyed by name).
   const color = colorFor(msg.agent_name);
+  const styles = BUBBLE_STYLES[color] ?? BUBBLE_STYLES.coral;
   const initials = msg.agent_name.slice(0, 2).toUpperCase();
+  const fromRight = isUserAgent(msg.agent_name);
+
   return (
-    <div className="flex w-full animate-fade-in justify-start">
-      <div className="flex items-end gap-2 max-w-[85%]">
+    <div
+      className={cn(
+        "flex w-full overflow-hidden",
+        fromRight ? "justify-end animate-bubble-in-right" : "justify-start animate-bubble-in-left",
+      )}
+      style={{ animationDelay: staggerDelay }}
+    >
+      <div
+        className={cn(
+          "flex items-end gap-2 max-w-[85%]",
+          fromRight && "flex-row-reverse",
+        )}
+      >
         <Avatar initials={initials} color={color} size="sm" />
-        <div className={cn("px-4 py-3 rounded-card bg-cream-dark/30 text-charcoal")}>
-          <div className="text-[10px] font-medium opacity-70 mb-0.5 capitalize">
+        <div
+          className={cn(
+            "px-4 py-3 rounded-card text-charcoal shadow-sm",
+            styles.bg,
+          )}
+        >
+          <div className={cn("text-[10px] font-semibold mb-0.5 capitalize", styles.label)}>
             {msg.agent_name}
           </div>
-          <div className="text-body">{msg.content}</div>
+          <div className="text-body font-medium">{msg.content}</div>
         </div>
       </div>
     </div>
@@ -197,7 +237,8 @@ const Negotiating = () => {
           <span className="text-body text-slate tabular-nums">{formatTimer(seconds)}</span>
         </div>
 
-        <h1 className="text-h1 text-navy mt-3">
+
+        <h1 className="text-h1 text-navy mt-1 text-center">
           {distinctAgents.length > 0
             ? `${distinctAgents.length + 1} agents talking`
             : "Agents getting started…"}
@@ -223,10 +264,10 @@ const Negotiating = () => {
 
         <div
           ref={scrollRef}
-          className="flex-1 mt-5 -mx-2 px-2 overflow-y-auto flex flex-col gap-3"
+          className="flex-1 mt-5 -mx-2 px-2 overflow-y-auto overflow-x-hidden flex flex-col gap-3"
         >
           {messages.map((m, i) => (
-            <Bubble key={i} msg={m} />
+            <Bubble key={i} msg={m} index={i} />
           ))}
         </div>
 

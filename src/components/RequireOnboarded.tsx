@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useProfile } from "@/hooks/useProfile";
+import { KetchupSpinner } from "@/components/KetchupSpinner";
 
 interface RequireOnboardedProps {
   children: ReactNode;
@@ -23,7 +24,7 @@ export const RequireOnboarded = ({ children }: RequireOnboardedProps) => {
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center bg-cream">
-        <div className="text-meta text-slate">Loading…</div>
+        <KetchupSpinner size={140} label="Loading…" />
       </div>
     );
   }
