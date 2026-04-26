@@ -4,6 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { RequireAuth } from "@/components/RequireAuth";
+import { RequireOnboarded } from "@/components/RequireOnboarded";
 import NotFound from "./pages/NotFound.tsx";
 import Welcome from "./pages/onboarding/Welcome.tsx";
 import Sms from "./pages/onboarding/Sms.tsx";
@@ -31,21 +32,119 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Navigate to="/onboarding/welcome" replace />} />
+
+          {/* Public — Welcome and Sms self-redirect when a session is present. */}
           <Route path="/onboarding/welcome" element={<Welcome />} />
           <Route path="/onboarding/sms" element={<Sms />} />
-          <Route path="/onboarding/voice-call" element={<RequireAuth><VoiceCall /></RequireAuth>} />
-          <Route path="/onboarding/permissions" element={<RequireAuth><Permissions /></RequireAuth>} />
-          <Route path="/groups/new/friends" element={<RequireAuth><Friends /></RequireAuth>} />
-          <Route path="/groups/new/name" element={<RequireAuth><NameGroup /></RequireAuth>} />
-          <Route path="/groups/new/frequency" element={<RequireAuth><FrequencyPage /></RequireAuth>} />
-          <Route path="/groups/new/window" element={<RequireAuth><WindowPage /></RequireAuth>} />
-          <Route path="/catchup/negotiating" element={<RequireAuth><Negotiating /></RequireAuth>} />
-          <Route path="/catchup/proposal" element={<RequireAuth><Proposal /></RequireAuth>} />
-          <Route path="/catchup/confirmed" element={<RequireAuth><Confirmed /></RequireAuth>} />
-          <Route path="/feedback/rating" element={<RequireAuth><Rating /></RequireAuth>} />
-          <Route path="/feedback/voice" element={<RequireAuth><FeedbackVoice /></RequireAuth>} />
-          <Route path="/home" element={<RequireAuth><Home /></RequireAuth>} />
-          <Route path="/memory" element={<RequireAuth><Memory /></RequireAuth>} />
+
+          {/* Voice onboarding — needs a session, but NOT yet completed onboarding. */}
+          <Route
+            path="/onboarding/voice-call"
+            element={
+              <RequireAuth>
+                <VoiceCall />
+              </RequireAuth>
+            }
+          />
+
+          {/* Everything below requires onboarded_at to be set on the backend. */}
+          <Route
+            path="/onboarding/permissions"
+            element={
+              <RequireOnboarded>
+                <Permissions />
+              </RequireOnboarded>
+            }
+          />
+          <Route
+            path="/groups/new/friends"
+            element={
+              <RequireOnboarded>
+                <Friends />
+              </RequireOnboarded>
+            }
+          />
+          <Route
+            path="/groups/new/name"
+            element={
+              <RequireOnboarded>
+                <NameGroup />
+              </RequireOnboarded>
+            }
+          />
+          <Route
+            path="/groups/new/frequency"
+            element={
+              <RequireOnboarded>
+                <FrequencyPage />
+              </RequireOnboarded>
+            }
+          />
+          <Route
+            path="/groups/new/window"
+            element={
+              <RequireOnboarded>
+                <WindowPage />
+              </RequireOnboarded>
+            }
+          />
+          <Route
+            path="/catchup/negotiating"
+            element={
+              <RequireOnboarded>
+                <Negotiating />
+              </RequireOnboarded>
+            }
+          />
+          <Route
+            path="/catchup/proposal"
+            element={
+              <RequireOnboarded>
+                <Proposal />
+              </RequireOnboarded>
+            }
+          />
+          <Route
+            path="/catchup/confirmed"
+            element={
+              <RequireOnboarded>
+                <Confirmed />
+              </RequireOnboarded>
+            }
+          />
+          <Route
+            path="/feedback/rating"
+            element={
+              <RequireOnboarded>
+                <Rating />
+              </RequireOnboarded>
+            }
+          />
+          <Route
+            path="/feedback/voice"
+            element={
+              <RequireOnboarded>
+                <FeedbackVoice />
+              </RequireOnboarded>
+            }
+          />
+          <Route
+            path="/home"
+            element={
+              <RequireOnboarded>
+                <Home />
+              </RequireOnboarded>
+            }
+          />
+          <Route
+            path="/memory"
+            element={
+              <RequireOnboarded>
+                <Memory />
+              </RequireOnboarded>
+            }
+          />
+
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

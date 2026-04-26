@@ -4,6 +4,7 @@ import { Layout } from "@/components/Layout";
 import { Button } from "@/components/Button";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
+import { useProfile } from "@/hooks/useProfile";
 import { toast } from "@/hooks/use-toast";
 
 const CODE_LENGTH = 6;
@@ -25,10 +26,26 @@ const Sms = () => {
   const location = useLocation();
   const phone = (location.state as { phone?: string } | null)?.phone ?? "";
 
+  const { session, isOnboarded, loading: profileLoading } = useProfile();
+
   const [digits, setDigits] = useState<string[]>(() => Array(CODE_LENGTH).fill(""));
   const [seconds, setSeconds] = useState(RESEND_SECONDS);
   const [verifying, setVerifying] = useState(false);
   const inputsRef = useRef<Array<HTMLInputElement | null>>([]);
+
+  // If we already have a Supabase session (e.g. page refresh after verify),
+  // skip the OTP form and route based on onboarding status.
+  useEffect(() => {
+    if (profileLoading || !session) return;
+    navigate(isOnboarded ? "/home" : "/onboarding/voice-call", { replace: true });
+  }, [profileLoading, session, isOnboarded, navigate]);
+
+  // No phone in route state and no session → user landed here directly.
+  // Send them back to /welcome to enter their number.
+  useEffect(() => {
+    if (profileLoading || session || phone) return;
+    navigate("/onboarding/welcome", { replace: true });
+  }, [profileLoading, session, phone, navigate]);
 
   // Countdown timer
   useEffect(() => {

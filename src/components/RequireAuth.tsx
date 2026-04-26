@@ -1,38 +1,20 @@
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import type { Session } from "@supabase/supabase-js";
-import { supabase } from "@/lib/supabase";
+import { useProfile } from "@/hooks/useProfile";
 
 interface RequireAuthProps {
   children: ReactNode;
 }
 
 /**
- * Route guard. Redirects to /onboarding/welcome when there is no Supabase session.
- * Sets up an onAuthStateChange listener BEFORE getSession() to avoid races.
+ * Route guard for screens that need a Supabase session but do NOT require
+ * onboarding to have finished (e.g. the voice onboarding screen itself).
+ *
+ * Redirects to /onboarding/welcome when no session.
  */
 export const RequireAuth = ({ children }: RequireAuthProps) => {
   const location = useLocation();
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    // Listener first
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
-      setLoading(false);
-    });
-
-    // Then hydrate existing session
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setLoading(false);
-    });
-
-    return () => {
-      sub.subscription.unsubscribe();
-    };
-  }, []);
+  const { session, loading } = useProfile();
 
   if (loading) {
     return (
