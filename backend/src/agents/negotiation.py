@@ -1,7 +1,16 @@
-"""Multi-agent negotiation orchestrator.
+"""Multi-agent negotiation orchestrator — 2-phase pipeline.
 
-This is the core of Catch-Up: multiple user agents negotiate
-a meetup plan through structured dialogue rounds.
+Phase 1 — Schedule sharing:
+  Each agent emits their calendar availability.
+  Orchestrator Gemini call finds the best common slot.
+
+Phase 2 — Venue discovery:
+  Group preferences compiled from all members.
+  Tavily search for real venues.
+  Orchestrator Gemini call picks the best match.
+
+SSE stream is keyed by catchup_id (not negotiation_id) so the stream
+endpoint can find the queue with just the catchup_id from the URL.
 """
 
 import asyncio
@@ -13,30 +22,38 @@ from src.agents.user_agent import create_user_agent
 from src.agents.tools.calendar_tool import check_availability
 from src.agents.tools.tavily_tool import search_venues
 from src.agents.tools.memory_tool import get_user_memories
+from src.agents.orchestrator import find_common_slot, pick_venue
+from src.agents.fake_preferences import compile_group_preferences
 from src.models.schemas import NegotiationMessage
+from src.services.gcal_client import get_calendar_context
+from src.services import supabase_client as db
 
 logger = logging.getLogger(__name__)
 
-# In-memory message queues per negotiation (for SSE streaming)
-# In prod, this would be Supabase Realtime
+# SSE message queues keyed by catchup_id
 _negotiation_streams: dict[str, asyncio.Queue] = {}
 
 
-def get_or_create_stream(negotiation_id: str) -> asyncio.Queue:
+def get_or_create_stream(catchup_id: str) -> asyncio.Queue:
     """Get or create a message queue for SSE streaming."""
-    if negotiation_id not in _negotiation_streams:
-        _negotiation_streams[negotiation_id] = asyncio.Queue()
-    return _negotiation_streams[negotiation_id]
+    if catchup_id not in _negotiation_streams:
+        _negotiation_streams[catchup_id] = asyncio.Queue()
+    return _negotiation_streams[catchup_id]
+
+
+def cleanup_stream(catchup_id: str) -> None:
+    """Remove the stream queue once negotiation is complete."""
+    _negotiation_streams.pop(catchup_id, None)
 
 
 async def emit_message(
-    negotiation_id: str,
+    catchup_id: str,
     agent_name: str,
     role: str,
     content: str,
     data: dict | None = None,
 ) -> NegotiationMessage:
-    """Emit a negotiation message to the stream and log it."""
+    """Emit a negotiation message to the SSE queue."""
     msg = NegotiationMessage(
         agent_name=agent_name,
         role=role,
@@ -44,13 +61,9 @@ async def emit_message(
         data=data or {},
         timestamp=datetime.now(),
     )
-
-    queue = get_or_create_stream(negotiation_id)
+    queue = get_or_create_stream(catchup_id)
     await queue.put(msg)
-
-    # TODO: also write to Supabase negotiation_messages table
-    logger.info(f"[{negotiation_id}] {agent_name} ({role}): {content[:80]}...")
-
+    logger.info("[%s] %s (%s): %.80s", catchup_id, agent_name, role, content)
     return msg
 
 
@@ -60,162 +73,161 @@ async def run_negotiation(
     members: list[dict],
     catchup_context: dict,
 ) -> dict:
-    """Run a full A2A negotiation between user agents.
+    """Run the 2-phase A2A negotiation pipeline.
 
     Args:
-        negotiation_id: Unique ID for this negotiation session.
-        catchup_id: The catchup being negotiated.
-        members: List of dicts with user_id, name, preferences, history.
-        catchup_context: Dict with vibe, time_window, group_members.
+        negotiation_id: DB id for logging/persistence.
+        catchup_id: Used as the SSE queue key and for DB updates.
+        members: List of {user_id, name, preferences, history}.
+        catchup_context: {vibe, time_window, location, group_members}.
 
     Returns:
-        dict with the final proposal or failure reason.
+        {negotiation_id, proposal} dict.
     """
-    await emit_message(
-        negotiation_id,
-        agent_name="system",
-        role="info",
-        content=f"Négociation lancée pour {len(members)} participants...",
-    )
+    # Small delay so the SSE client can connect before messages start flowing
+    await asyncio.sleep(0.8)
 
-    # Create an agent per member
-    agents = {}
-    for member in members:
-        tools = [check_availability, search_venues, get_user_memories]
-        agent = create_user_agent(
-            user_id=member["user_id"],
-            user_name=member["name"],
-            preferences=member.get("preferences", {}),
-            history=member.get("history", []),
-            catchup_context=catchup_context,
-            tools=tools,
-        )
-        agents[member["user_id"]] = {
-            "agent": agent,
-            "name": member["name"],
-            "preferences": member.get("preferences", {}),
-        }
+    final_proposal = None
 
-    # === Negotiation rounds ===
-    # Simple protocol: initiator proposes → others respond → iterate max 3 rounds
-    max_rounds = 3
-    proposal = None
+    try:
+        await emit_message(catchup_id, "system", "info",
+                           f"🚀 Négociation lancée pour {len(members)} participant(s)...")
 
-    for round_num in range(max_rounds):
-        await emit_message(
-            negotiation_id,
-            agent_name="system",
-            role="info",
-            content=f"--- Tour {round_num + 1}/{max_rounds} ---",
-        )
-
-        # TODO: Actually invoke each agent via ADK runner
-        # For now, simulate the negotiation flow for demo scaffolding
-        
-        initiator = members[0]
-        initiator_name = f"{initiator['name'].lower().replace(' ', '_')}_agent"
-
-        if round_num == 0:
-            # Initiator proposes
-            await emit_message(
-                negotiation_id,
-                agent_name=initiator_name,
-                role="propose",
-                content=f"Je propose qu'on se retrouve mardi soir pour un dîner. "
-                f"{initiator['name']} est libre et adore la cuisine italienne. "
-                f"Qu'est-ce que vous en pensez ?",
-                data={"proposed_day": "mardi", "proposed_time": "20h", "cuisine": "italien"},
-            )
-
-            # Others respond
-            for member in members[1:]:
-                agent_name = f"{member['name'].lower().replace(' ', '_')}_agent"
-                await emit_message(
-                    negotiation_id,
-                    agent_name=agent_name,
-                    role="counter",
-                    content=f"{member['name']} préfère jeudi soir, mais mardi peut marcher "
-                    f"si c'est après 20h. Pour la cuisine, pas de sushi svp !",
-                    data={"available": ["mardi après 20h", "jeudi soir"]},
+        # ── Create agents (with calendar context in their system prompt) ──────
+        agents = {}
+        for member in members:
+            try:
+                cal_ctx = get_calendar_context(
+                    user_id=member["user_id"],
+                    time_window=catchup_context.get("time_window", "next 2 weeks"),
+                    intent=catchup_context.get("vibe", "dinner"),
                 )
+            except Exception as exc:
+                logger.warning("calendar_context failed for %s: %s", member["name"], exc)
+                cal_ctx = ""
 
-                # Small delay for dramatic effect in SSE stream
-                await asyncio.sleep(0.8)
-
-        elif round_num == 1:
-            # Convergence round
-            await emit_message(
-                negotiation_id,
-                agent_name=initiator_name,
-                role="propose",
-                content="OK, mardi 20h30 ça marche pour tout le monde ? "
-                "Je cherche un bon italien dans le 11e...",
+            agent = create_user_agent(
+                user_id=member["user_id"],
+                user_name=member["name"],
+                preferences=member.get("preferences", {}),
+                history=member.get("history", []),
+                catchup_context=catchup_context,
+                calendar_context=cal_ctx,
+                tools=[check_availability, search_venues, get_user_memories],
             )
-            await asyncio.sleep(0.5)
-
-            # Tavily search for a real venue
-            venue_results = search_venues(
-                query="restaurant italien",
-                location="Paris 11e",
-                max_results=3,
-            )
-
-            venue_name = "La Trattoria"
-            if venue_results["status"] == "success" and venue_results["venues"]:
-                venue_name = venue_results["venues"][0]["title"]
-
-            await emit_message(
-                negotiation_id,
-                agent_name=initiator_name,
-                role="propose",
-                content=f"J'ai trouvé {venue_name} dans le 11e, très bien noté. "
-                f"Mardi 20h30, ça vous va ?",
-                data={"venue": venue_name, "time": "mardi 20h30"},
-            )
-
-            for member in members[1:]:
-                agent_name = f"{member['name'].lower().replace(' ', '_')}_agent"
-                await emit_message(
-                    negotiation_id,
-                    agent_name=agent_name,
-                    role="accept",
-                    content=f"Parfait pour {member['name']} ! Mardi 20h30 à {venue_name} 🤝",
-                )
-                await asyncio.sleep(0.5)
-
-            proposal = {
-                "venue": venue_name,
-                "time": "mardi 20h30",
-                "activity": "dîner italien",
-                "justification": f"Compromis trouvé : {venue_name} dans le 11e, "
-                f"mardi 20h30 — convient à tous les participants.",
+            agents[member["user_id"]] = {
+                "agent": agent,
+                "name": member["name"],
+                "calendar": cal_ctx,
             }
-            break
 
-    # Emit final result
-    if proposal:
+        # ══════════════════════════════════════════════════════════════════════
+        # PHASE 1 — Schedule sharing
+        # ══════════════════════════════════════════════════════════════════════
+        await emit_message(catchup_id, "system", "info",
+                           "📅 Phase 1 : chaque agent partage son agenda...")
+
+        schedules = []
+        for member in members:
+            agent_name = f"{member['name'].lower().replace(' ', '_')}_agent"
+            cal_text = agents[member["user_id"]]["calendar"]
+
+            await emit_message(
+                catchup_id, agent_name, "schedule",
+                f"Voici les disponibilités de {member['name']} :\n{cal_text}",
+                data={"user_id": member["user_id"]},
+            )
+            schedules.append({
+                "agent_name": agent_name,
+                "user_name": member["name"],
+                "schedule_text": cal_text,
+            })
+            await asyncio.sleep(0.6)
+
+        # Orchestrator Phase 1 — find common slot
+        await emit_message(catchup_id, "orchestrator", "info",
+                           "🧠 Orchestrateur : analyse des agendas en cours...")
+        slot = await find_common_slot(schedules, catchup_context)
         await emit_message(
-            negotiation_id,
-            agent_name="system",
-            role="info",
-            content=f"✅ Consensus trouvé ! {proposal['venue']} — {proposal['time']}",
-            data=proposal,
+            catchup_id, "orchestrator", "slot",
+            f"✅ Créneau commun trouvé : {slot.day} à {slot.time}\n💬 {slot.reasoning}",
+            data={"day": slot.day, "time": slot.time, "reasoning": slot.reasoning},
         )
-    else:
+
+        await asyncio.sleep(0.4)
+
+        # ══════════════════════════════════════════════════════════════════════
+        # PHASE 2 — Venue discovery
+        # ══════════════════════════════════════════════════════════════════════
+        await emit_message(catchup_id, "system", "info",
+                           "🔍 Phase 2 : recherche du meilleur endroit...")
+
+        # Compile group preferences
+        prefs_list = [member.get("preferences", {}) for member in members]
+        group_prefs = compile_group_preferences(prefs_list)
+
+        # Build Tavily search query
+        vibe = catchup_context.get("vibe", "restaurant")
+        cuisines = " ".join(group_prefs["cuisines_liked"][:2]) if group_prefs["cuisines_liked"] else ""
+        dietary = " ".join(group_prefs["dietary"]) if group_prefs["dietary"] else ""
+        query = " ".join(filter(None, [vibe, cuisines, dietary])).strip() or "restaurant"
+        location = catchup_context.get("location", "Paris")
+
+        await emit_message(catchup_id, "orchestrator", "info",
+                           f"🔎 Recherche Tavily : « {query} » à {location}...")
+
+        venue_results = search_venues(query=query, location=location, max_results=5)
+        venues = []
+        if venue_results["status"] == "success" and venue_results["venues"]:
+            venues = venue_results["venues"]
+            for v in venues:
+                snippet = (v.get("snippet") or "")[:120]
+                await emit_message(
+                    catchup_id, "orchestrator", "venue_option",
+                    f"📍 {v['title']} — {snippet}",
+                    data={"title": v["title"], "url": v.get("url", "")},
+                )
+                await asyncio.sleep(0.3)
+        else:
+            await emit_message(catchup_id, "orchestrator", "info",
+                               "⚠️ Pas de résultats Tavily — l'orchestrateur va proposer un lieu.")
+
+        # Orchestrator Phase 2 — pick venue
+        await emit_message(catchup_id, "orchestrator", "info",
+                           "🧠 Orchestrateur : sélection du meilleur lieu...")
+        proposal = await pick_venue(slot, venues, group_prefs, catchup_context)
+
         await emit_message(
-            negotiation_id,
-            agent_name="system",
-            role="info",
-            content="❌ Pas de consensus après 3 tours. Proposition du meilleur compromis...",
+            catchup_id, "orchestrator", "confirm",
+            f"🎉 Proposition finale : **{proposal.venue}** — {proposal.time}\n{proposal.justification}",
+            data=proposal.model_dump(),
         )
 
-    # Signal end of stream
-    await emit_message(
-        negotiation_id,
-        agent_name="system",
-        role="done",
-        content="Négociation terminée.",
-        data={"proposal": proposal},
-    )
+        # ── Persist to DB ──────────────────────────────────────────────────
+        try:
+            await db.save_proposal(catchup_id, {
+                "venue": proposal.venue,
+                "time": proposal.time,
+                "activity": proposal.activity,
+                "justification": proposal.justification,
+            })
+            await db.update_catchup_status(catchup_id, "proposed")
+        except Exception as exc:
+            logger.error("DB persist failed for catchup %s: %s", catchup_id, exc)
 
-    return {"negotiation_id": negotiation_id, "proposal": proposal}
+        final_proposal = proposal.model_dump()
+
+    except Exception as exc:
+        logger.exception("Negotiation %s failed: %s", negotiation_id, exc)
+        await emit_message(catchup_id, "system", "error",
+                           f"❌ Erreur inattendue : {exc}")
+
+    finally:
+        await emit_message(
+            catchup_id, "system", "done",
+            "Négociation terminée.",
+            data={"proposal": final_proposal},
+        )
+        # Queue cleanup happens in the SSE generator after it reads "done"
+
+    return {"negotiation_id": negotiation_id, "proposal": final_proposal}

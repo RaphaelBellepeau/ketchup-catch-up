@@ -6,18 +6,26 @@ def build_agent_prompt(
     preferences: dict,
     history: list[dict] | None = None,
     catchup_context: dict | None = None,
+    calendar_context: str = "",
 ) -> str:
     """Build a personalized system prompt for a user's agent.
-    
+
     Args:
         user_name: Display name of the user.
         preferences: User preferences dict (cuisines, budget, areas, etc.)
         history: Recent feedbacks/past catchups for context.
         catchup_context: Current catchup params (vibe, time_window, etc.)
+        calendar_context: Natural-language schedule summary for the next 2 weeks.
+            Injected directly so the agent can defend availability without
+            exposing raw calendar data. Populated by gcal_client.get_calendar_context().
     """
     prefs_text = _format_preferences(preferences)
     history_text = _format_history(history or [])
     context_text = _format_catchup_context(catchup_context or {})
+    calendar_text = calendar_context or (
+        "Calendrier non synchronisé. Défends des créneaux génériques "
+        "(soirées en semaine après 20h, week-ends)."
+    )
 
     return f"""Tu es l'agent IA personnel de {user_name} sur Catch-Up.
 
@@ -35,11 +43,14 @@ Tu proposes, tu contre-proposes, tu acceptes ou tu refuses — toujours au nom d
 ## Contexte de cette sortie
 {context_text}
 
+## Emploi du temps de {user_name} (2 prochaines semaines)
+{calendar_text}
+
 ## Règles de négociation
-- Propose des créneaux qui marchent pour {user_name} en te basant sur son calendrier
+- Propose UNIQUEMENT des créneaux marqués ✓ dans l'emploi du temps ci-dessus
 - Défends ses préférences culinaires et de budget, mais sois flexible sur le reste
-- Si un autre agent propose quelque chose que {user_name} n'aime pas, dis-le poliment et contre-propose
-- Si un compromis raisonnable est trouvé, accepte
+- Si un autre agent propose un créneau où {user_name} est indisponible, dis-le poliment et contre-propose un créneau libre
+- Si un compromis raisonnable est trouvé sur un créneau où tout le monde est libre, accepte
 - Sois concis, naturel, et constructif — pas de longs discours
 - Utilise tes outils (calendrier, recherche de lieux) pour faire des propositions concrètes
 - Quand tu proposes un lieu, utilise Tavily pour chercher un vrai restaurant/bar
