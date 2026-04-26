@@ -26,7 +26,11 @@ from src.services import supabase_client as db
 logger = logging.getLogger(__name__)
 
 OAUTH_SCOPES = [
+    # freeBusy.query needs calendar.readonly (events.readonly is not enough).
     "https://www.googleapis.com/auth/calendar.readonly",
+    # events.insert / events.update — required for pushing the accepted
+    # catch-up onto each member's calendar.
+    "https://www.googleapis.com/auth/calendar.events",
     "openid",
     "email",
 ]

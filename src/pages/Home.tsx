@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Phone } from "lucide-react";
+import { Phone, Settings as SettingsIcon } from "lucide-react";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/Button";
 import { Avatar } from "@/components/Avatar";
@@ -84,25 +84,35 @@ const Home = () => {
             <p className="text-meta text-coral uppercase">Home</p>
             <h1 className="text-h1 text-navy mt-1">Hi {firstName}</h1>
           </div>
-          <button
-            type="button"
-            onClick={() => navigate("/memory")}
-            aria-label="Open your agent's memory"
-            className="relative rounded-pill active:scale-95 transition-transform"
-          >
-            <Avatar
-              initials={initials}
-              color="ketchup-red"
-              size="lg"
-              className="text-white"
-            />
-            {pendingDebrief && (
-              <span
-                className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-pill bg-mint ring-2 ring-cream"
-                aria-hidden="true"
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => navigate("/settings")}
+              aria-label="Open settings"
+              className="w-11 h-11 rounded-pill bg-white/70 border border-light-gray flex items-center justify-center text-navy hover:bg-white transition-colors active:scale-95"
+            >
+              <SettingsIcon className="w-5 h-5" strokeWidth={2} />
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate("/settings")}
+              aria-label="Open settings"
+              className="relative rounded-pill active:scale-95 transition-transform"
+            >
+              <Avatar
+                initials={initials}
+                color="ketchup-red"
+                size="lg"
+                className="text-white"
               />
-            )}
-          </button>
+              {pendingDebrief && (
+                <span
+                  className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-pill bg-mint ring-2 ring-cream"
+                  aria-hidden="true"
+                />
+              )}
+            </button>
+          </div>
         </div>
 
         <p className="text-body text-slate mt-2">Anyone you want to see soon?</p>

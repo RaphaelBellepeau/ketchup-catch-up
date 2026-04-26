@@ -21,7 +21,7 @@ import Confirmed from "./pages/catchup/Confirmed.tsx";
 import Rating from "./pages/feedback/Rating.tsx";
 import FeedbackVoice from "./pages/feedback/Voice.tsx";
 import Home from "./pages/Home.tsx";
-import Memory from "./pages/Memory.tsx";
+import Settings from "./pages/Settings.tsx";
 
 const queryClient = new QueryClient();
 
@@ -148,13 +148,15 @@ const App = () => (
             }
           />
           <Route
-            path="/memory"
+            path="/settings"
             element={
               <RequireOnboarded>
-                <Memory />
+                <Settings />
               </RequireOnboarded>
             }
           />
+          {/* Backwards-compat: any old /memory link lands on /settings. */}
+          <Route path="/memory" element={<Navigate to="/settings" replace />} />
 
           <Route path="*" element={<NotFound />} />
         </Routes>

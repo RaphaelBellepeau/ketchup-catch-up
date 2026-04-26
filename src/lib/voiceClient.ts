@@ -48,24 +48,43 @@ declare global {
 let scriptsPromise: Promise<void> | null = null;
 
 /**
- * Resolve the HTTP base URL for backend assets. Same logic in dev (Vite proxy)
- * and prod (absolute URL). Exported so callers can pre-warm scripts before
- * the user gesture that opens the call.
+ * Same-origin base for the Gradbot static JS + worker assets.
+ *
+ * The bundles live in `public/static/js/` and ship inside the frontend
+ * container (vendored from gradbot's Python package). We MUST load them
+ * same-origin: browsers refuse `new Worker(crossOriginUrl)` even with
+ * CORS allow-all, and AudioWorklet.addModule is just as strict. So this
+ * always returns `window.location.origin` — never the backend URL.
  */
-export function getHttpBase(): string {
-  const useProxy = import.meta.env.DEV;
-  if (useProxy) return window.location.origin;
+export function getAssetsBase(): string {
+  return window.location.origin;
+}
+
+/** Backend HTTP base — used for `/api/audio-config`, REST API, etc. */
+export function getApiBase(): string {
+  if (import.meta.env.DEV) return window.location.origin; // Vite proxy
   const fromEnv = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "");
   if (!fromEnv) throw new Error("VITE_API_BASE_URL must be set");
   return fromEnv;
 }
 
+/** Backend WS base — used for `/ws/voice/...`. */
+function getWsBase(): string {
+  if (import.meta.env.DEV) {
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${window.location.host}`;
+  }
+  const fromEnv = (import.meta.env.VITE_WS_BASE_URL as string | undefined)?.replace(/\/$/, "");
+  if (!fromEnv) throw new Error("VITE_WS_BASE_URL must be set");
+  return fromEnv;
+}
+
 /** Dynamically inject the Gradbot bundle <script> tags. Idempotent. */
-export function loadGradbotScripts(httpBase: string = getHttpBase()): Promise<void> {
+export function loadGradbotScripts(assetsBase: string = getAssetsBase()): Promise<void> {
   if (scriptsPromise) return scriptsPromise;
   scriptsPromise = (async () => {
     for (const name of SCRIPT_FILES) {
-      const src = `${httpBase}/static/js/${name}`;
+      const src = `${assetsBase}/static/js/${name}`;
       const existing = document.querySelector(
         `script[${SCRIPT_TAG_DATA_ATTR}="${name}"]`,
       );
@@ -162,22 +181,21 @@ export async function openVoiceCall({
   speed = 1.0,
   handlers = {},
 }: OpenVoiceCallOptions): Promise<VoiceCallHandle> {
-  const useProxy = import.meta.env.DEV;
-  const httpBase = getHttpBase();
-  const wsBase = useProxy
-    ? `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`
-    : (import.meta.env.VITE_WS_BASE_URL as string | undefined)?.replace(/\/$/, "");
-  if (!wsBase) {
-    throw new Error("VITE_WS_BASE_URL must be set");
-  }
+  const assetsBase = getAssetsBase();
+  const apiBase = getApiBase();
+  const wsBase = getWsBase();
 
-  await loadGradbotScripts(httpBase);
+  // Web Worker / AudioWorklet bundles MUST come from same-origin (frontend's
+  // own /static/js/, vendored from gradbot at build time).
+  await loadGradbotScripts(assetsBase);
 
   if (typeof window.SyncedAudioPlayer !== "function") {
     throw new Error("SyncedAudioPlayer global was not installed by Gradbot bundles");
   }
 
-  const audioConfigRes = await fetch(`${httpBase}/api/audio-config`);
+  // /api/audio-config is fine cross-origin via CORS (the backend allows
+  // any origin), so it goes to the backend as usual.
+  const audioConfigRes = await fetch(`${apiBase}/api/audio-config`);
   const audioConfig: AudioConfigResponse = audioConfigRes.ok
     ? await audioConfigRes.json().catch(() => ({}))
     : {};
@@ -189,7 +207,7 @@ export async function openVoiceCall({
   let ws: WebSocket | null = null;
 
   const player = new window.SyncedAudioPlayer({
-    basePath: `${httpBase}/static/js`,
+    basePath: `${assetsBase}/static/js`,
     sampleRate: 24000,
     pcmOutput: Boolean(audioConfig.pcm),
     echoCancellation: true, // CRITICAL: prevents the agent hearing its own TTS

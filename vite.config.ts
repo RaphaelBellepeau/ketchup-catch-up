@@ -12,10 +12,10 @@ export default defineConfig(({ mode }) => {
   const apiHttp = (env.VITE_API_BASE_URL || "http://localhost:8000").replace(/\/$/, "");
   const apiWs = (env.VITE_WS_BASE_URL || apiHttp.replace(/^http/, "ws")).replace(/\/$/, "");
 
-  // Routes that must be proxied so the browser sees them as same-origin.
-  // The Gradbot voice client creates Web Workers from /static/js/* — workers
-  // refuse cross-origin script URLs even with CORS allow-all, so this proxy
-  // is mandatory for voice to work in dev.
+  // Backend-only routes that must look same-origin to the browser:
+  // `/api/audio-config` is a backend endpoint and the WS upgrade for voice.
+  // Gradbot's static JS bundles are vendored under `public/static/js/` and
+  // served directly by Vite, so they don't need proxying anymore.
   const proxyHttp = {
     target: apiHttp,
     changeOrigin: true,
@@ -32,7 +32,6 @@ export default defineConfig(({ mode }) => {
       port: 8080,
       hmr: { overlay: false },
       proxy: {
-        "/static": proxyHttp,
         "/api/audio-config": proxyHttp,
         "/ws": proxyWs,
       },
