@@ -1,12 +1,14 @@
 # Ketchup — your AI agent talks to your friends' so you actually see them
 
 Ketchup is a multi-agent friend coordinator. Every user has a personal AI
-agent that knows their schedule, their preferences, their relationships —
+agent that knows their schedule, their preferences, their relationships
 and negotiates on their behalf with their friends' agents to lock in a
-catch-up everyone can show up to. The user opens the app, picks a window
-and a vibe, and the agents do the rest: rounds of slot proposals, real
-venue search, an honest compromise summary, a one-tap accept, and a
-post-event voice debrief that refines what each agent knows.
+catch-up everyone can show up to. The user has two option: he can either 
+let the agents wake up alone and plan a catch-up on their own and me notified 
+or open the app, picka window and a vibe, and the agents do the 
+rest. In both cases the agents propose time slots, search for real venues, produce 
+a one-tap accept organised meet-up and call for a post-event debrief
+that refines what each agent knows.
 
 The product moves the chat OUT of the group thread and INTO an
 agent-to-agent layer. Coordination stops being a 30-message loop on
@@ -25,29 +27,28 @@ WhatsApp; it becomes "your agent already worked it out."
    `calendar.events` (event creation).
 3. **Group + window.** Pick friends from your discoverable list, name
    the group, pick a vibe (dinner/drinks/brunch/activity), and pick a
-   date range with the inline calendar.
-4. **A2A negotiation (live SSE feed).** Backend spawns one agent per
-   member. Up to 3 rounds of structured slot proposals — each agent only
+   date range with the inline calendar or opt for the reccuring meet-up,
+   set the goal frequency and let the agents figure it out.
+5. **A2A negotiation (live SSE feed).** Backend spawns one agent per
+   member. Up to 3 rounds of structured slot proposals; each agent only
    sees its own user's data; the orchestrator only sees structured
    summaries from each agent (privacy by separation, not by prompt
    instruction). Tavily is called with the merged venue criteria, the
    results are passed through a venue-extraction LLM pass that pulls
    real venue names out of "top 10" listicles. Agents rank, the
    orchestrator aggregates, the proposal is locked.
-5. **Vote.** Accept — and Google Calendar events are pushed to every
+6. **Vote.** Accept — and Google Calendar events are pushed to every
    connected member. Reject — and the negotiation restarts with the
    rejection reason injected into every agent's system prompt so it
    actively avoids the failure mode (slot, venue, price band).
-6. **Post-event debrief (Gradbot, again).** Once the event is past, the
+7. **Post-event debrief (Gradbot, again).** Once the event is past, the
    home page rings: an "incoming call" card from your agent. The agent
    already knows the venue, the friends, and your prior memories. It
    rebounds on what it thought it knew ("you had this place pegged as
    the cozy-bistro vibe — did it land?") and saves either confirmation
    or correction back into your profile.
 
-Everything streams in real time over SSE: the user can watch the agents
-debate, see who's flexing on which slot, and see Tavily go look for
-places.
+Everything streams in real time over SSE
 
 ## Built for the Build Berlin hackathon
 
@@ -144,7 +145,14 @@ The frontend dev server uses Vite for HMR, with `/api/audio-config` and
 `/ws` proxied to the backend so the browser sees them same-origin (Web
 Workers refuse cross-origin URLs even with CORS allow-all).
 
+
+
 ## Built by
 
 Two devs, 24 hours, fuelled by ketchup metaphors and the shared
 suspicion that group chats are not the answer.
+
+## Our glorious LinkedIn
+
+https://www.linkedin.com/in/romain-caussignac/
+https://www.linkedin.com/in/raphael-bellepeau/
