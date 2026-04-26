@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/Button";
 import { Input } from "@/components/Input";
-import { BottleLogo } from "@/components/BottleLogo";
 import { supabase } from "@/lib/supabase";
 import { devLogin, isDevLoginAvailable } from "@/lib/devLogin";
 import { useProfile } from "@/hooks/useProfile";
@@ -88,7 +87,7 @@ const Welcome = () => {
         {/* Content */}
         <div className="relative flex-1 flex flex-col px-6 pt-8 pb-8">
           <div className="flex-1 flex flex-col items-center justify-center text-center gap-4">
-            <BottleLogo size={96} />
+            <img src="/Nice_logo.svg" alt="Ketchup logo" className="w-24 h-auto" />
             <h1 className="text-h1 text-ketchup-red lowercase">ketchup</h1>
             <p className="text-body text-charcoal max-w-[280px]">
               your agent talks to your friends'
