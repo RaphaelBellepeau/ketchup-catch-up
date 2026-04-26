@@ -16,6 +16,12 @@ logger = logging.getLogger(__name__)
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 
+# Gemini 2.5 Flash silently spends a chunk of the token budget on
+# "thinking" before any visible output. With small budgets (~2k) it
+# regularly clips JSON mid-string. 4k gives the structured outputs
+# breathing room without being wasteful.
+DEFAULT_MAX_TOKENS = 4000
+
 
 def _api_key() -> str:
     key = os.environ.get("LLM_API_KEY")
@@ -43,25 +49,64 @@ async def chat_json(
     user: str,
     *,
     temperature: float = 0.7,
-    max_tokens: int = 2000,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
     model: str | None = None,
 ) -> dict[str, Any]:
     """Send a one-shot chat completion and parse a JSON object from the reply.
 
-    The model is instructed via response_format=json_object to return a
-    parseable JSON document. Falls back to extracting the first {...} block
-    if the model wraps it in prose.
-
-    Notes on max_tokens:
-        Gemini 2.5 Flash counts internal "thinking" tokens against this
-        budget. We default to 2000 so a ~100-token JSON answer has
-        breathing room behind the model's reasoning. We also set
-        reasoning_effort=none and thinking_budget=0 to keep the
-        chain-of-thought minimal — this is what was causing the negotiation
-        agent JSON to come back truncated mid-string.
+    Robustness layers (in order):
+      1. Call the configured model with response_format=json_object.
+      2. If finish_reason="length" (truncated) OR the JSON refuses to
+         parse, retry once on the lite model — which has thinking
+         disabled by default and so spends every token on visible output.
+      3. If THAT also fails, raise.
     """
+    primary = model or _model()
+    fallback = lite_model()
+
+    content, finish_reason = await _chat_raw(
+        primary, system, user, temperature, max_tokens
+    )
+
+    parsed = _try_parse(content)
+    if parsed is not None and finish_reason != "length":
+        return parsed
+
+    # Retry on the lite model — same tokens budget, no thinking spend.
+    if fallback != primary:
+        reason = "truncated" if finish_reason == "length" else "unparseable"
+        logger.warning(
+            "LLM reply was %s on %s; retrying on %s",
+            reason, primary, fallback,
+        )
+        retry_content, retry_finish = await _chat_raw(
+            fallback, system, user, temperature, max_tokens
+        )
+        retry_parsed = _try_parse(retry_content)
+        if retry_parsed is not None and retry_finish != "length":
+            return retry_parsed
+        # Fall through with whichever attempt actually produced JSON.
+        if retry_parsed is not None:
+            return retry_parsed
+
+    if parsed is not None:
+        # Original parse worked but flagged length — caller chose to
+        # accept partial data rather than raise. Better than nothing.
+        return parsed
+    # Re-raise the original parse error so callers see WHY it failed.
+    return _parse_json_lenient(content)
+
+
+async def _chat_raw(
+    model: str,
+    system: str,
+    user: str,
+    temperature: float,
+    max_tokens: int,
+) -> tuple[str, str | None]:
+    """Single LLM call. Returns (content, finish_reason)."""
     payload: dict[str, Any] = {
-        "model": model or _model(),
+        "model": model,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -78,11 +123,23 @@ async def chat_json(
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(url, json=payload, headers=headers)
     if resp.status_code != 200:
-        logger.warning("LLM call failed status=%s body=%s", resp.status_code, resp.text[:300])
+        logger.warning(
+            "LLM call failed status=%s body=%s", resp.status_code, resp.text[:300],
+        )
         raise RuntimeError(f"LLM returned {resp.status_code}")
     data = resp.json()
-    content = data["choices"][0]["message"]["content"] or ""
-    return _parse_json_lenient(content)
+    choice = data["choices"][0]
+    content = choice.get("message", {}).get("content") or ""
+    finish_reason = choice.get("finish_reason")
+    return content, finish_reason
+
+
+def _try_parse(text: str) -> dict[str, Any] | None:
+    """Best-effort JSON parse — returns None if it can't be made into a dict."""
+    try:
+        return _parse_json_lenient(text)
+    except (ValueError, json.JSONDecodeError):
+        return None
 
 
 def _parse_json_lenient(text: str) -> dict[str, Any]:

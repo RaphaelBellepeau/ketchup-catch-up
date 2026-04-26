@@ -173,26 +173,42 @@ async def vote_on_proposal(
     if not catchup:
         return vote
 
-    # Reject → re-launch a new negotiation round with the rejection as
-    # context. We only re-trigger when the catchup is actually showing a
-    # proposal (status == "proposed"); a stray reject during an in-flight
-    # negotiation is just noise.
+    # Reject (while a proposal is on the table) → re-launch a fresh
+    # negotiation round with the rejection injected as context.
     if body.vote == "reject" and catchup.get("status") == "proposed":
         await _restart_negotiation_after_reject(catchup, user_id, body.reason or "")
-        return vote
+        return {**vote, "outcome": "restarting"}
 
-    # First accept moves the catchup to "accepted" (demo path — Léa/Tom
-    # are simulated members so we don't wait for them to vote). The
-    # transition is one-shot: subsequent accept votes don't re-trigger
-    # the calendar push.
-    if (
-        body.vote == "accept"
-        and catchup.get("status") == "proposed"
-    ):
-        await db.update_catchup_status(catchup_id, "accepted")
-        # Fire-and-forget the calendar push so the vote response stays
-        # fast; users without a connected calendar are skipped silently.
-        asyncio.create_task(_push_to_calendars_safely(catchup_id))
+    # Accept: lock in only when EVERY member has accepted. Calendar push
+    # fires once at the threshold; partial accepts just sit in the votes
+    # table and the catchup stays in "proposed" so anyone can still
+    # refuse and trigger a restart.
+    if body.vote == "accept" and catchup.get("status") == "proposed":
+        members = await db.get_group_members(catchup["group_id"])
+        member_ids = {m["user_id"] for m in members if m.get("user_id")}
+        votes = await db.get_votes(catchup_id)
+        accepted_ids = {
+            v["user_id"] for v in votes
+            if v.get("vote") == "accept" and v.get("user_id") in member_ids
+        }
+        pending_ids = sorted(member_ids - accepted_ids)
+
+        if member_ids and not pending_ids:
+            await db.update_catchup_status(catchup_id, "accepted")
+            asyncio.create_task(_push_to_calendars_safely(catchup_id))
+            return {
+                **vote,
+                "outcome": "all_accepted",
+                "accepted_count": len(accepted_ids),
+                "total_members": len(member_ids),
+            }
+        return {
+            **vote,
+            "outcome": "waiting_for_others",
+            "accepted_count": len(accepted_ids),
+            "total_members": len(member_ids),
+            "pending_user_ids": pending_ids,
+        }
     return vote
 
 
@@ -243,6 +259,13 @@ async def _restart_negotiation_after_reject(
                 ],
             }
         )
+
+    # Drop stale votes from the rejected round so a previous accept
+    # can't auto-confirm the new proposal before everyone weighs in.
+    try:
+        await db.clear_votes(catchup_id)
+    except Exception:
+        logger.exception("Failed to clear stale votes (non-fatal)")
 
     negotiation = await db.create_negotiation(catchup_id)
     await db.update_catchup_status(catchup_id, "negotiating")

@@ -504,6 +504,15 @@ async def get_votes(catchup_id: str) -> list[dict]:
     return result.data or []
 
 
+async def clear_votes(catchup_id: str) -> None:
+    """Wipe all votes for a catchup — called when we kick off a new
+    negotiation round so stale accepts from the prior proposal don't
+    auto-confirm the next one.
+    """
+    client = get_client()
+    client.table("votes").delete().eq("catchup_id", catchup_id).execute()
+
+
 # ── Memories ───────────────────────────────────────────
 
 async def get_memories(user_id: str, scope: str = "") -> list[dict]:

@@ -34,7 +34,7 @@ YOUR ROLE — read this before every reply:
 You are {user_name}'s personal AI advocate. Your loyalty is to {user_name},
 NOT to the group. Other agents are advocating for their own users; if their
 proposal hurts {user_name}'s comfort, schedule, energy, or interests — push
-back politely.
+back politely AND firmly.
 
 PRIVACY (HARD RULES — never break):
 - NEVER quote {user_name}'s memories verbatim. Always paraphrase.
@@ -47,16 +47,35 @@ PRIVACY (HARD RULES — never break):
   (e.g. say "blocked Saturday morning", not "kids' football match").
 - Share only the minimum the group needs to converge on a plan.
 
-ADVOCACY:
-- Treat {user_name}'s stated weekly commitments and recurring blocks as
-  hard constraints — never propose a slot that breaks them.
-- Refuse slots that are obviously bad for {user_name} (right before/after
-  a known important event, very early after a late night out, etc.).
-  Frame the refusal in vague terms — "tough morning that day for them".
-- When proposing, lead with what {user_name} actively WANTS, not just
-  what's available.
-- It's fine to compromise — but make it visible: "Tuesday isn't ideal,
-  but Léa can stretch if it's after 8".
+HARD BLOCKS — REFUSE, don't quietly fold:
+Some constraints are NON-NEGOTIABLE for {user_name}. When the group is
+heading toward one of them, your job is to STOP THE BUS — call it out
+explicitly, not silently flex into a yes you'll regret. Examples:
+- A recurring weekly commitment from the memories (yoga, gym, kids
+  pickup, recurring class) — these are paid, scheduled, or involve other
+  people; not movable.
+- A real busy slot already on the calendar.
+- A slot that's obviously bad-fit (the night before a known early
+  commitment, immediately after another late night, mid-workday, etc.).
+
+If a hard block is on the table:
+- DO NOT include the conflicting slot in your top_slots list.
+- In your one_liner, EXPLICITLY say it doesn't work — "Tuesday evening
+  is locked for {user_name}", "Saturday morning is already booked".
+  Vague is fine on the REASON (privacy), but the refusal itself must be
+  unambiguous.
+- This applies even in the LAST round. Better to surface "no slot fits"
+  and let the orchestrator widen the window than to fake an agreement.
+- If others are converging on your hard block in round 2/3, ESCALATE:
+  repeat the refusal, propose alternatives, do NOT cave.
+
+ADVOCACY (positive):
+- Lead with what {user_name} actively WANTS, not just what's available.
+- Personality matters: if their memories paint them as a loud-lively-bar
+  person, push for that vibe even when others suggest something quieter.
+- Real compromise IS fine — but name it: "Tuesday isn't ideal, but
+  {user_name} can stretch if it's after 8". Don't pretend something
+  works when it doesn't.
 """
 
 
@@ -218,23 +237,49 @@ def venue_criteria_prompt(
 What you know about {user_name}:
 {memory_text}
 {rules}
-TASK: propose venue/activity criteria for this {vibe or "catch-up"}. Translate {user_name}'s preferences into 3-5 short search keywords and a one-sentence summary in {user_name}'s voice.
+TASK: propose 3-5 venue/activity keywords for this {vibe or "catch-up"} that reflect {user_name}'s actual taste — not generic SEO bait.
+
+GENERIC KEYWORDS ARE FORBIDDEN. The whole point is originality. Words like
+"casual dinner", "good food", "nice place", "cosy spot" tell the search
+engine NOTHING and produce listicles. Be specific to who {user_name} is:
+
+- Vibe descriptors with concrete texture, not adjectives:
+  ✓ "tiny natural wine bar with shared tables"
+  ✓ "Korean BBQ with counter seating"
+  ✓ "speakeasy with low lighting and vinyl"
+  ✓ "wood-fire pizza, neighbourhood spot"
+  ✗ "italian", "casual", "cool place"
+- Cuisine specifics, not categories:
+  ✓ "fresh hand-pulled noodles", "sourdough Neapolitan pizza", "izakaya small plates"
+  ✗ "asian food", "italian"
+- Hooks that {user_name} actually loves (pull from their memories):
+  natural wine? Open kitchen? Late dancing? Bottomless brunch? Quirky theme?
+- Activity ideas can be creative when the vibe fits: pétanque + drinks,
+  bouldering + ramen, pottery class, vinyl bar, board-games café, comedy
+  club, late natural wine after a film.
 
 OUTPUT RULES:
-- Don't quote raw memories. Keywords are derived/general (e.g. "small italian", "quiet bistro"), never sensitive (no names, no addresses).
-- Skip neighborhood if it would feel like exposing a home address — keep it broad ("Paris east side" rather than "rue X").
+- Don't quote raw memories. Keywords are DERIVED, never sensitive (no
+  names, no addresses).
+- Neighborhood: a broad area, not a street. Skip if it'd expose where
+  {user_name} actually lives.
 - Reply with VALID JSON only — no prose around it."""
     user = """Respond ONLY with JSON in this exact shape:
 
 {
-  "keywords": ["<keyword>", "<keyword>", "<keyword>"],
-  "neighborhood": "<optional area/city, e.g. 'Paris 11th', or empty string>",
-  "one_liner": "<one short sentence about what {name} would love, max 25 words>"
+  "keywords": ["<specific keyword>", "<specific keyword>", "<specific keyword>"],
+  "neighborhood": "<broad area, e.g. 'Paris 11th' or 'Paris east side', empty string if none>",
+  "one_liner": "<one specific sentence about what {name} would actually love, max 25 words, with personality>"
 }
 
-Keywords should be venue search terms. Examples:
-  ["small italian", "quiet bistro", "low-key", "11th arrondissement"]
-  ["natural wine", "lively", "late dinner"]
+Good keyword sets:
+  ["tiny natural wine spot", "shared tables", "no reservation", "Paris 11th"]
+  ["pétanque bar", "outdoor terrace", "warm night vibe"]
+  ["wood-fire neapolitan pizza", "no-fuss bistro", "open kitchen"]
+
+Bad keyword sets (rejected — too generic):
+  ["dinner", "casual", "nice"]
+  ["italian", "good food", "Paris"]
 """
     return system, user
 
@@ -278,6 +323,63 @@ OUTPUT RULES:
 }
 
 ranked_indices is a permutation of [0..N-1] — best first.
+"""
+    return system, user
+
+
+def tavily_query_composition_prompt(
+    *,
+    keywords: list[str],
+    neighborhoods: list[str],
+    vibe: str,
+    one_liners: list[str],
+) -> tuple[str, str]:
+    """Ask the LLM to write a single natural-language search query — the
+    way a real person would type it into Google — instead of dumping a
+    keyword salad at Tavily.
+
+    Returns:
+        {"query": "small natural wine spot Paris 11th cozy not too loud",
+         "location": "Paris 11th"}
+    """
+    one_liner_block = "\n".join(f"  - {ol}" for ol in one_liners if ol) or "  (none)"
+    system = """You compose natural search queries — like a real person
+typing into Google to find a SPECIFIC kind of venue or activity. Output
+ONE concise natural query (no keyword dumps, no SEO bait).
+
+Good queries sound like things a friend would tell another friend:
+  - "small natural wine spot in Paris 11ème where you can hear conversations"
+  - "speakeasy cocktail bar Paris quiet not too loud"
+  - "Saturday brunch good coffee Paris east side"
+  - "wood-fire neapolitan pizza no-fuss bistro Paris 11th"
+  - "pétanque bar outdoor terrace Paris evening"
+  - "vinyl bar natural wine late Paris east"
+
+Bad queries (rejected — sound like SEO):
+  - "casual dinner italian Paris" (too vague, returns "top 10" lists)
+  - "good restaurant Paris 11th" (generic, no personality)
+  - "natural wine cozy bistro 11th arrondissement Paris" (keyword salad)
+
+Reply with VALID JSON only."""
+
+    user = f"""Group is looking for a {vibe or "catch-up"} venue. Each
+agent suggested keywords + a one-liner about what their user wants:
+
+Merged keywords (deduped): {", ".join(keywords) or "(none)"}
+Common neighborhoods: {", ".join(neighborhoods) or "(none)"}
+Agent one-liners about user taste:
+{one_liner_block}
+
+Compose ONE natural search query that captures the group's combined
+intent (8-15 words, no quotes, no keyword stuffing). Pick the ONE most
+distinctive vibe across the agents and lead with it.
+
+Respond ONLY with JSON:
+
+{{
+  "query": "<natural search-engine query>",
+  "location": "<broad area, e.g. 'Paris 11th' or 'Paris east side'>"
+}}
 """
     return system, user
 

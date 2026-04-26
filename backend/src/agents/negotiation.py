@@ -99,6 +99,42 @@ async def emit(
 
 # ── Helpers ────────────────────────────────────────────
 
+async def _compose_tavily_query(
+    *,
+    keywords: list[str],
+    neighborhoods: list[str],
+    vibe: str,
+    one_liners: list[str],
+    fallback_location: str,
+) -> tuple[str, str]:
+    """LLM-composed natural-language search query (no keyword salad).
+
+    Falls back to a space-joined keyword string if the LLM call fails.
+    """
+    sys_p, user_p = prompts.tavily_query_composition_prompt(
+        keywords=keywords,
+        neighborhoods=neighborhoods,
+        vibe=vibe,
+        one_liners=one_liners,
+    )
+    try:
+        result = await llm_client.chat_json(
+            sys_p, user_p, temperature=0.5, model=llm_client.lite_model(),
+        )
+    except Exception:
+        logger.exception("Tavily query composition failed; falling back to keyword join")
+        return (
+            " ".join(keywords[:6]) or (vibe or "casual dinner"),
+            (neighborhoods[0] if neighborhoods else fallback_location),
+        )
+
+    query = str(result.get("query") or "").strip() or " ".join(keywords[:6])
+    location = str(result.get("location") or "").strip() or (
+        neighborhoods[0] if neighborhoods else fallback_location
+    )
+    return query, location
+
+
 async def _extract_real_venues(
     *,
     tavily_answer: str,
@@ -588,7 +624,12 @@ async def run_negotiation(
         neighborhood = str(crit.get("neighborhood") or "").strip()
         one_liner = str(crit.get("one_liner") or "").strip()
         criteria_per_agent.append(
-            {"name": ctx["name"], "keywords": keywords, "neighborhood": neighborhood}
+            {
+                "name": ctx["name"],
+                "keywords": keywords,
+                "neighborhood": neighborhood,
+                "one_liner": one_liner,
+            }
         )
         await emit(
             negotiation_id,
@@ -610,14 +651,22 @@ async def run_negotiation(
         }:
             all_neighborhoods.append(c["neighborhood"])
 
-    query = " ".join(all_keywords[:6]) or (vibe or "casual dinner")
-    location = " or ".join(all_neighborhoods[:2]) or default_location
+    # Compose a natural-language search query (instead of a keyword salad)
+    # using the lite model. A friend-typed Google query gets us actual
+    # specific places; "italian Paris cozy 11th" gets us "Top 10" listicles.
+    query, location = await _compose_tavily_query(
+        keywords=all_keywords,
+        neighborhoods=all_neighborhoods,
+        vibe=vibe,
+        one_liners=[c.get("one_liner") or "" for c in criteria_per_agent],
+        fallback_location=default_location,
+    )
 
     await emit(
         negotiation_id,
         agent_name="orchestrator",
         role="info",
-        content=f"Searching Tavily: {query} · {location}",
+        content=f"Searching Tavily: {query}" + (f" · {location}" if location else ""),
         data={"query": query, "location": location},
     )
 
