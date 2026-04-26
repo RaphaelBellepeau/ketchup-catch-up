@@ -1,10 +1,15 @@
-"""Orchestrator LLM for multi-agent negotiations.
+"""Orchestrator LLM — focused Gemini calls for the negotiation pipeline.
 
-Two focused Gemini calls — no tools needed, just structured JSON output.
-Uses google-genai SDK (v1.73.1) with GOOGLE_API_KEY from .env.
+Two functions, each making a single structured Gemini call:
 
-  find_common_slot()  — Phase 1: given N schedules, find the best common slot
-  pick_venue()        — Phase 2: given Tavily results + group prefs, pick the venue
+  find_common_slot()  Phase 1: given N calendar schedules, find the best
+                               common time slot for a group meetup.
+
+  pick_venue()        Phase 2: given Tavily search results + group prefs,
+                               select the best venue. (Not used in Phase 1.)
+
+Uses google-genai SDK with GOOGLE_API_KEY from .env.
+JSON mode is requested via response_mime_type to avoid markdown-wrapping.
 """
 
 import json
@@ -20,30 +25,34 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class SlotDecision(BaseModel):
-    """Common time slot agreed by the orchestrator."""
+    """Best common time slot agreed by the orchestrator."""
     day: str = Field(description="Day name, e.g. 'jeudi'")
     time: str = Field(description="Start time, e.g. '20h30'")
-    reasoning: str = Field(description="Short French explanation")
+    reasoning: str = Field(description="Short French explanation (max 2 sentences)")
 
 
 class FinalProposal(BaseModel):
-    """Final venue proposal produced by the orchestrator."""
+    """Final venue + time proposal produced by the orchestrator."""
     venue: str
     url: str = ""
     time: str = Field(description="Full day + time, e.g. 'jeudi 20h30'")
     activity: str = Field(description="Type of outing, e.g. 'dîner'")
-    justification: str = Field(description="Why this venue fits the group")
+    justification: str = Field(description="Why this venue fits the group (≤ 3 sentences)")
 
 
 # ---------------------------------------------------------------------------
-# Shared Gemini call helper
+# Gemini call helper
 # ---------------------------------------------------------------------------
 
-async def _call_gemini(system_instruction: str, user_prompt: str) -> dict:
-    """Make a single Gemini call, return parsed JSON dict.
+async def _call_gemini_json(system_instruction: str, user_prompt: str) -> dict:
+    """Make a single Gemini call and return a parsed JSON dict.
 
-    Strips markdown fences defensively. Raises on parse failure — callers
-    handle exceptions and provide fallbacks.
+    Uses response_mime_type='application/json' so the model returns raw JSON
+    without markdown fences. Falls back to manual fence-stripping just in case.
+
+    Raises:
+        json.JSONDecodeError: if the model response is not valid JSON.
+        Exception: any google-genai transport error.
     """
     from google import genai
     from google.genai import types
@@ -56,38 +65,55 @@ async def _call_gemini(system_instruction: str, user_prompt: str) -> dict:
         contents=user_prompt,
         config=types.GenerateContentConfig(
             system_instruction=system_instruction,
-            temperature=0.2,      # Low temp → consistent structured output
+            temperature=0.2,
             max_output_tokens=512,
+            response_mime_type="application/json",
+            # Disable thinking tokens — they break JSON parsing by prepending
+            # reasoning content before the actual JSON output.
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
         ),
     )
 
-    raw = response.text.strip()
-    # Strip markdown fences if the model wraps anyway
+    raw = response.text or ""
+
+    # Strip markdown fences if present (defensive fallback)
     if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    return json.loads(raw.strip())
+        lines = raw.splitlines()
+        raw = "\n".join(
+            line for line in lines
+            if not line.startswith("```")
+        ).strip()
+
+    # Slice from the first '{' to the last '}' to handle any residual prefix/suffix
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        raise ValueError(f"No JSON object found in Gemini response: {raw[:300]!r}")
+    raw = raw[start : end + 1]
+
+    return json.loads(raw)
 
 
 # ---------------------------------------------------------------------------
 # Phase 1 — Schedule alignment
 # ---------------------------------------------------------------------------
 
-_SLOT_SYSTEM = """Tu es l'orchestrateur d'une négociation Catch-Up.
-Ta tâche : analyser les emplois du temps de N participants et trouver le meilleur créneau commun.
+_SLOT_SYSTEM = """\
+Tu es l'orchestrateur d'une application Catch-Up qui aide des amis à planifier des sorties.
+Ta tâche : analyser les emplois du temps de N participants et trouver le MEILLEUR créneau commun.
 
-Règles :
-- Choisis un créneau marqué ✓ dans TOUS les agendas si possible
-- Si aucun créneau n'est commun à tous, choisis le créneau qui convient au plus grand nombre
-- Préfère les soirées (après 19h) pour un dîner, les après-midis pour une activité
+Règles strictes :
+- Choisis un créneau marqué ✓ dans TOUS les agendas si possible.
+- Si aucun créneau n'est commun à tous, choisis celui qui convient au plus grand nombre et explique le compromis.
+- Préfère les soirées (après 19h) pour un dîner, les après-midis pour une activité.
+- Réponds UNIQUEMENT avec un JSON valide respectant exactement ce schéma :
 
-Réponds UNIQUEMENT avec un JSON valide, sans markdown ni backticks :
 {
-  "day": "nom du jour (ex: jeudi)",
-  "time": "heure de début (ex: 20h30)",
-  "reasoning": "explication courte en français (max 2 phrases)"
-}"""
+  "day": "<nom du jour, ex: jeudi>",
+  "time": "<heure de début, ex: 20h30>",
+  "reasoning": "<explication courte en français, max 2 phrases>"
+}
+"""
 
 
 async def find_common_slot(
@@ -97,13 +123,15 @@ async def find_common_slot(
     """Ask Gemini to find the best common time slot from all agents' schedules.
 
     Args:
-        schedules: List of dicts — {agent_name, user_name, schedule_text}
-        catchup_context: Dict with vibe, time_window, etc.
+        schedules: List of dicts with keys: agent_name, user_name, schedule_text.
+        catchup_context: Dict with at least: vibe, time_window.
 
     Returns:
-        SlotDecision with day, time, reasoning.
+        SlotDecision (day, time, reasoning). Returns a safe fallback on error.
     """
     vibe = catchup_context.get("vibe", "dîner")
+    time_window = catchup_context.get("time_window", "prochaines 2 semaines")
+
     schedules_text = "\n\n".join(
         f"=== {s['user_name']} ===\n{s['schedule_text']}"
         for s in schedules
@@ -111,46 +139,53 @@ async def find_common_slot(
 
     user_prompt = (
         f"Type de sortie : {vibe}\n"
-        f"Fenêtre : {catchup_context.get('time_window', 'prochaines 2 semaines')}\n\n"
-        f"Agendas des participants :\n\n{schedules_text}\n\n"
-        "Quel est le meilleur créneau commun ?"
+        f"Fenêtre de planification : {time_window}\n\n"
+        f"Agendas des {len(schedules)} participants :\n\n"
+        f"{schedules_text}\n\n"
+        "Quel est le meilleur créneau commun pour organiser ce rendez-vous ?"
     )
 
     try:
-        data = await _call_gemini(_SLOT_SYSTEM, user_prompt)
+        data = await _call_gemini_json(_SLOT_SYSTEM, user_prompt)
         decision = SlotDecision(**data)
-        logger.info("Slot found: %s %s — %s", decision.day, decision.time, decision.reasoning)
+        logger.info(
+            "Slot found: %s %s — %s",
+            decision.day, decision.time, decision.reasoning,
+        )
         return decision
+
     except Exception as exc:
-        logger.error("find_common_slot failed: %s — using fallback", exc)
+        logger.error("find_common_slot failed: %s — returning fallback slot", exc)
         return SlotDecision(
-            day="samedi",
-            time="19h30",
+            day="jeudi",
+            time="20h30",
             reasoning=f"Créneau par défaut (orchestrateur indisponible : {exc})",
         )
 
 
 # ---------------------------------------------------------------------------
-# Phase 2 — Venue selection
+# Phase 2 — Venue selection  (not used in the Phase-1 demo)
 # ---------------------------------------------------------------------------
 
-_VENUE_SYSTEM = """Tu es l'orchestrateur d'une négociation Catch-Up.
-Ta tâche : choisir le meilleur lieu parmi les résultats de recherche, en tenant compte des préférences du groupe.
+_VENUE_SYSTEM = """\
+Tu es l'orchestrateur d'une application Catch-Up qui aide des amis à planifier des sorties.
+Ta tâche : choisir le MEILLEUR lieu parmi les résultats de recherche, en respectant les préférences du groupe.
 
-Règles :
-- Évite absolument les cuisines que quelqu'un n'aime pas
-- Respecte les contraintes alimentaires (végétarien, halal, etc.)
-- Prends le budget le plus restrictif du groupe comme maximum
-- S'il n'y a pas de résultat parfait, choisis le moins mauvais et explique le compromis
+Règles strictes :
+- Évite absolument les cuisines que quelqu'un n'aime pas.
+- Respecte les contraintes alimentaires (végétarien, halal, sans gluten, etc.).
+- Prends le budget le plus restrictif du groupe comme plafond.
+- S'il n'y a pas de résultat parfait, choisis le moins mauvais et explique le compromis.
+- Réponds UNIQUEMENT avec un JSON valide respectant exactement ce schéma :
 
-Réponds UNIQUEMENT avec un JSON valide, sans markdown ni backticks :
 {
-  "venue": "nom exact du lieu",
-  "url": "url si disponible, sinon chaîne vide",
-  "time": "jour et heure convenus (ex: jeudi 20h30)",
-  "activity": "type de sortie (ex: dîner, soirée, activité sportive)",
-  "justification": "pourquoi ce lieu est le meilleur compromis (max 3 phrases)"
-}"""
+  "venue": "<nom exact du lieu>",
+  "url": "<url si disponible, sinon chaîne vide>",
+  "time": "<jour et heure convenus, ex: jeudi 20h30>",
+  "activity": "<type de sortie, ex: dîner, soirée, activité sportive>",
+  "justification": "<pourquoi ce lieu est le meilleur compromis, max 3 phrases>"
+}
+"""
 
 
 async def pick_venue(
@@ -163,20 +198,26 @@ async def pick_venue(
 
     Args:
         slot: The agreed time slot from Phase 1.
-        venues: Tavily results — [{title, url, snippet}]
+        venues: Tavily results — list of {title, url, snippet}.
         group_prefs: Compiled group preferences from compile_group_preferences().
-        catchup_context: Dict with vibe, location, etc.
+        catchup_context: Dict with at least: vibe, location.
 
     Returns:
-        FinalProposal with venue, time, activity, justification.
+        FinalProposal. Returns a safe fallback on error.
     """
     agreed_time = f"{slot.day} à {slot.time}"
     vibe = catchup_context.get("vibe", "dîner")
 
-    venues_text = "\n\n".join(
-        f"Option {i+1}: {v['title']}\nURL: {v.get('url', 'N/A')}\nDescription: {v.get('snippet', '')}"
-        for i, v in enumerate(venues)
-    ) if venues else "Aucun résultat Tavily disponible — propose un lieu générique adapté."
+    venues_text = (
+        "\n\n".join(
+            f"Option {i+1}: {v['title']}\n"
+            f"URL: {v.get('url', 'N/A')}\n"
+            f"Description: {v.get('snippet', '(aucune description)')}"
+            for i, v in enumerate(venues)
+        )
+        if venues
+        else "Aucun résultat de recherche disponible — propose un lieu générique adapté."
+    )
 
     prefs_text = (
         f"Cuisines aimées : {', '.join(group_prefs.get('cuisines_liked', [])) or 'pas de préférence'}\n"
@@ -195,12 +236,13 @@ async def pick_venue(
     )
 
     try:
-        data = await _call_gemini(_VENUE_SYSTEM, user_prompt)
+        data = await _call_gemini_json(_VENUE_SYSTEM, user_prompt)
         proposal = FinalProposal(**data)
         logger.info("Venue selected: %s at %s", proposal.venue, proposal.time)
         return proposal
+
     except Exception as exc:
-        logger.error("pick_venue failed: %s — using fallback", exc)
+        logger.error("pick_venue failed: %s — returning fallback proposal", exc)
         fallback_venue = venues[0]["title"] if venues else "Lieu à déterminer"
         fallback_url = venues[0].get("url", "") if venues else ""
         return FinalProposal(

@@ -1,20 +1,21 @@
-"""Demo negotiation pipeline — no auth or DB required.
+"""Demo negotiation — Phase 1 only (no auth, no DB, no ADK agents).
 
-Three hard-coded fake members share their calendar schedules, then the
-Gemini orchestrator (find_common_slot) identifies the best common slot
-for a meetup and streams each step via an asyncio.Queue for SSE.
+Pipeline:
+  1. Three fake user-agents emit their calendar availability over SSE.
+  2. The Gemini orchestrator (find_common_slot) analyses all three schedules
+     and returns the best common time slot.
+  3. A "done" sentinel is pushed so the SSE client knows to close.
 
-Fake member roster:
-  - Raphaël  (persona 0: busy professional, loves Italian/French/Japanese)
-  - Marie    (persona 1: social, free weekday evenings, budget-conscious)
-  - Thomas   (persona 2: weekend person, vegetarian)
-
-These three have intentional schedule tension:
-  Raphaël  ✓ Tue evening, Thu evening, Sat
+Intentional schedule tension:
+  Raphaël  ✓ Tue evening, Thu evening, Sat afternoon/evening
   Marie    ✓ Mon evening, Wed evening, Fri evening, Sun afternoon
   Thomas   ✓ Sat all day, Sun morning/afternoon, Thu evening
 
-→ Thursday evening is the only common slot, which Gemini should find.
+→ Thursday evening is the ONLY slot that works for all three.
+  Gemini should identify this.
+
+SSE queue is keyed by session_id (default "demo").
+Call reset_demo_stream() before each run to avoid stale messages.
 """
 
 import asyncio
@@ -26,25 +27,36 @@ from src.models.schemas import NegotiationMessage
 
 logger = logging.getLogger(__name__)
 
+
 # ---------------------------------------------------------------------------
-# In-memory SSE queues (keyed by session id, typically "demo")
+# In-memory SSE queues (keyed by session_id)
 # ---------------------------------------------------------------------------
 
 _demo_streams: dict[str, asyncio.Queue] = {}
 
 
 def get_or_create_demo_stream(session_id: str = "demo") -> asyncio.Queue:
+    """Return existing queue or create a new one."""
     if session_id not in _demo_streams:
         _demo_streams[session_id] = asyncio.Queue()
     return _demo_streams[session_id]
 
 
+def reset_demo_stream(session_id: str = "demo") -> asyncio.Queue:
+    """Always create a fresh queue — call this before each negotiation run
+    so stale messages from a previous session don't bleed into the new stream.
+    """
+    _demo_streams[session_id] = asyncio.Queue()
+    return _demo_streams[session_id]
+
+
 def cleanup_demo_stream(session_id: str = "demo") -> None:
+    """Remove the queue once the SSE client has consumed all messages."""
     _demo_streams.pop(session_id, None)
 
 
 # ---------------------------------------------------------------------------
-# Fake member data
+# Fake member roster
 # ---------------------------------------------------------------------------
 
 DEMO_MEMBERS = [
@@ -139,6 +151,7 @@ async def _emit(
     content: str,
     data: dict | None = None,
 ) -> NegotiationMessage:
+    """Push a NegotiationMessage onto the SSE queue and log it."""
     msg = NegotiationMessage(
         agent_name=agent_name,
         role=role,
@@ -148,54 +161,63 @@ async def _emit(
     )
     queue = get_or_create_demo_stream(session_id)
     await queue.put(msg)
-    logger.info("[demo/%s] %s (%s): %.80s", session_id, agent_name, role, content)
+    logger.info("[demo/%s] %s (%s): %.100s", session_id, agent_name, role, content)
     return msg
 
 
 # ---------------------------------------------------------------------------
-# Main pipeline
+# Phase 1 pipeline
 # ---------------------------------------------------------------------------
 
 async def run_demo_negotiation(session_id: str = "demo") -> dict:
-    """Run Phase 1 demo: 3 agents share calendars → Gemini finds common slot.
+    """Run Phase 1: fake agents share calendars → Gemini finds common slot.
+
+    Each step is streamed to the SSE queue in real time.
+    A 'done' sentinel is always emitted at the end (even on error) so the
+    SSE client can close cleanly.
 
     Args:
         session_id: Key for the SSE queue (default "demo").
 
     Returns:
-        dict with slot decision and member schedules.
+        {"session_id": ..., "slot": SlotDecision.model_dump() | None}
     """
-    # Brief pause so the SSE client has time to connect
+    # Brief pause so the SSE client has time to connect before messages flow
     await asyncio.sleep(0.8)
 
     slot_decision = None
 
     try:
+        # ── Kick-off ──────────────────────────────────────────────────────
         await _emit(
             session_id, "system", "info",
-            f"🚀 Négociation lancée — {len(DEMO_MEMBERS)} agents en ligne..."
+            f"🚀 Négociation démarrée — {len(DEMO_MEMBERS)} agents en ligne...",
         )
         await asyncio.sleep(0.5)
 
-        # ── PHASE 1: Each agent shares their calendar ─────────────────────
+        # ── Phase 1 announcement ──────────────────────────────────────────
         await _emit(
             session_id, "system", "info",
-            "📅 Phase 1 : chaque agent partage son agenda avec les autres..."
+            "📅 Phase 1 : chaque agent partage son agenda avec le groupe...",
         )
         await asyncio.sleep(0.6)
 
+        # ── Each fake agent shares their calendar ─────────────────────────
         schedules = []
         for member in DEMO_MEMBERS:
             agent_name = f"{member['name'].lower()}_agent"
 
-            # Brief "typing" pause to feel natural
-            await asyncio.sleep(0.8)
+            # Natural "typing" pause
+            await asyncio.sleep(0.9)
 
             await _emit(
                 session_id,
                 agent_name,
                 "schedule",
-                f"{member['emoji']} {member['name']} partage son agenda :\n\n{member['schedule_text']}",
+                (
+                    f"{member['emoji']} **{member['name']}** partage son agenda :\n\n"
+                    f"{member['schedule_text']}"
+                ),
                 data={
                     "user_id": member["id"],
                     "user_name": member["name"],
@@ -211,11 +233,11 @@ async def run_demo_negotiation(session_id: str = "demo") -> dict:
 
             await asyncio.sleep(0.4)
 
-        # ── ORCHESTRATOR: Find common slot via Gemini ─────────────────────
+        # ── Orchestrator: find common slot via Gemini ─────────────────────
         await asyncio.sleep(0.5)
         await _emit(
-            session_id, "orchestrator", "info",
-            "🧠 Orchestrateur : analyse des 3 agendas avec Gemini..."
+            session_id, "orchestrator", "thinking",
+            "🧠 Orchestrateur : analyse des 3 agendas avec Gemini...",
         )
         await asyncio.sleep(0.8)
 
@@ -239,22 +261,25 @@ async def run_demo_negotiation(session_id: str = "demo") -> dict:
         slot_decision = slot.model_dump()
 
         await asyncio.sleep(0.6)
+
+        # ── Confirmation ──────────────────────────────────────────────────
         await _emit(
             session_id, "system", "info",
-            "✔️ Phase 1 terminée. Le créneau est validé par tous les agents."
+            "✔️ Phase 1 terminée. Le créneau est validé — les agents ont trouvé un accord.",
         )
 
     except Exception as exc:
-        logger.exception("Demo negotiation failed: %s", exc)
+        logger.exception("Demo negotiation (session=%s) failed: %s", session_id, exc)
         await _emit(
             session_id, "system", "error",
-            f"❌ Erreur inattendue : {exc}"
+            f"❌ Erreur inattendue dans la négociation : {exc}",
         )
 
     finally:
+        # Always emit 'done' so the SSE client knows to close the connection
         await _emit(
             session_id, "system", "done",
-            "Négociation terminée.",
+            "Négociation Phase 1 terminée.",
             data={"slot": slot_decision},
         )
 

@@ -1,24 +1,34 @@
 import { useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
 import { Layout } from "@/components/Layout";
 import { Avatar } from "@/components/Avatar";
-import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import {
-  negotiationMessages,
-  type NegotiationMessage,
-  type NegotiationSender,
-} from "@/data/mockData";
 
-const USE_REAL = import.meta.env.VITE_USE_REAL_API === "true";
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
-const MAX_RETRIES = 3;
+const API = "http://127.0.0.1:8000";
 
-const senderLabel: Record<NegotiationSender, string> = {
-  you: "You",
-  marie: "Marie",
-  tom: "Tom · via phone",
-  system: "",
+// ── Message shape from the backend ───────────────────────────────────────────
+interface BackendMsg {
+  agent_name: string; // "raphael_agent" | "marie_agent" | "thomas_agent" | "orchestrator" | "system"
+  role: string;       // "schedule" | "thinking" | "slot" | "info" | "error" | "done"
+  content: string;
+  data: Record<string, unknown>;
+  timestamp: string;
+}
+
+// ── Map agent_name → bubble colour ───────────────────────────────────────────
+const agentColor: Record<string, string> = {
+  "raphaël_agent": "bg-ketchup-red text-white",
+  "marie_agent":   "bg-mint text-charcoal",
+  "thomas_agent":  "bg-sunshine text-charcoal",
+  orchestrator:    "bg-navy text-white",
+  system:          "",
+};
+
+const agentLabel: Record<string, string> = {
+  "raphaël_agent": "🧑‍💻 Raphaël",
+  "marie_agent":   "👩‍🎨 Marie",
+  "thomas_agent":  "🧘 Thomas",
+  orchestrator:    "🧠 Orchestrateur",
+  system:          "",
 };
 
 const formatTimer = (s: number) => {
@@ -27,60 +37,67 @@ const formatTimer = (s: number) => {
   return `${m}:${sec.toString().padStart(2, "0")}`;
 };
 
-const Bubble = ({ msg }: { msg: NegotiationMessage }) => {
-  if (msg.sender === "system") {
+/** Convert **bold** markdown to <strong> tags for display. */
+const parseBold = (text: string) =>
+  text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+
+// ── Single chat bubble ────────────────────────────────────────────────────────
+const Bubble = ({ msg }: { msg: BackendMsg }) => {
+  const key = msg.agent_name.toLowerCase();
+
+  // System / info messages → centred italic
+  if (msg.agent_name === "system") {
+    if (msg.role === "done") return null;
     return (
       <div className="w-full text-center my-1 animate-fade-in">
-        <span className="text-body italic text-slate">{msg.content}</span>
+        <span className="text-body italic text-slate"
+          dangerouslySetInnerHTML={{ __html: parseBold(msg.content) }} />
       </div>
     );
   }
 
-  const isYou = msg.sender === "you";
-  const isMarie = msg.sender === "marie";
-  const isTom = msg.sender === "tom";
+  const isOrchestrator = msg.agent_name === "orchestrator";
+  const colorClass = agentColor[key] ?? "bg-light-gray text-charcoal";
+  const label = agentLabel[key] ?? msg.agent_name;
+
+  // Orchestrator slot result → highlight card
+  if (msg.role === "slot") {
+    return (
+      <div className="w-full animate-fade-in">
+        <div className="bg-navy text-white rounded-card px-4 py-3 border-2 border-ketchup-red">
+          <div className="text-[10px] font-semibold opacity-70 mb-1">{label}</div>
+          <div className="text-body whitespace-pre-wrap"
+            dangerouslySetInnerHTML={{ __html: parseBold(msg.content) }} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
       className={cn(
         "flex w-full animate-fade-in",
-        isYou ? "justify-end" : "justify-start",
+        isOrchestrator ? "justify-center" : "justify-start",
       )}
     >
-      <div
-        className={cn(
-          "max-w-[80%] px-4 py-3 rounded-card",
-          isYou && "bg-ketchup-red text-white rounded-br-[5px]",
-          isMarie && "bg-mint text-charcoal",
-          isTom && "bg-sunshine text-charcoal",
-        )}
-      >
-        <div
-          className={cn(
-            "text-[10px] font-medium opacity-70 mb-0.5",
-            isTom && "italic",
-          )}
-        >
-          {senderLabel[msg.sender]}
-        </div>
-        <div className="text-body">{msg.content}</div>
+      <div className={cn("max-w-[85%] px-4 py-3 rounded-card", colorClass)}>
+        <div className="text-[10px] font-semibold opacity-70 mb-0.5">{label}</div>
+        <div className="text-body whitespace-pre-wrap"
+          dangerouslySetInnerHTML={{ __html: parseBold(msg.content) }} />
       </div>
     </div>
   );
 };
 
+// ── Page ─────────────────────────────────────────────────────────────────────
 const Negotiating = () => {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const catchupId = (location.state as { catchupId?: string } | null)?.catchupId ?? "demo";
-
-  const [messages, setMessages] = useState<NegotiationMessage[]>([]);
+  const [messages, setMessages] = useState<BackendMsg[]>([]);
   const [progress, setProgress] = useState(0);
-  const [tavilyCaption, setTavilyCaption] = useState("Tavily · gathering options…");
   const [seconds, setSeconds] = useState(0);
+  const [status, setStatus] = useState<"idle" | "running" | "done" | "error">("idle");
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Timer count-up
+  // Count-up timer
   useEffect(() => {
     const t = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(t);
@@ -91,95 +108,67 @@ const Negotiating = () => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
-  // Mock mode driver
+  // 1. POST /demo/negotiate  →  2. listen to SSE /demo/negotiate/stream
   useEffect(() => {
-    if (USE_REAL) return;
-    let cancelled = false;
-    const timeouts: number[] = [];
-    let acc = 0;
-
-    negotiationMessages.forEach((m, i) => {
-      acc += m.delay_ms;
-      const id = window.setTimeout(() => {
-        if (cancelled) return;
-        setMessages((prev) => [...prev, m]);
-        setProgress(Math.round(((i + 1) / negotiationMessages.length) * 100));
-        if (m.content.toLowerCase().includes("places found")) {
-          setTavilyCaption(m.content);
-        }
-      }, acc);
-      timeouts.push(id);
-    });
-
-    const doneId = window.setTimeout(() => {
-      if (!cancelled) navigate("/catchup/proposal", { state: { catchupId } });
-    }, acc + 1200);
-    timeouts.push(doneId);
-
-    return () => {
-      cancelled = true;
-      timeouts.forEach(clearTimeout);
-    };
-  }, [navigate, catchupId]);
-
-  // Real mode driver (SSE with backoff)
-  useEffect(() => {
-    if (!USE_REAL) return;
-    let retries = 0;
     let es: EventSource | null = null;
-    let reconnectTimer: number | null = null;
     let cancelled = false;
 
-    const connect = () => {
-      if (cancelled) return;
-      const url = `${API_BASE}/catchups/${catchupId}/negotiate/stream`;
-      es = new EventSource(url);
+    const run = async () => {
+      try {
+        setStatus("running");
 
-      es.onmessage = (evt) => {
-        try {
-          const payload = JSON.parse(evt.data);
-          switch (payload.type) {
-            case "message":
-              setMessages((prev) => [...prev, payload.data as NegotiationMessage]);
-              break;
-            case "progress":
-              setProgress(Number(payload.data?.value ?? 0));
-              break;
-            case "venue_search":
-              setTavilyCaption(`Tavily · ${payload.data?.caption ?? "searching…"}`);
-              break;
-            case "done":
-              es?.close();
-              navigate("/catchup/proposal", { state: { catchupId } });
-              break;
-          }
-          retries = 0;
-        } catch (e) {
-          console.warn("[negotiating] bad SSE payload", e);
-        }
-      };
+        // Kick off the negotiation on the backend
+        await fetch(`${API}/demo/negotiate`, { method: "POST" });
 
-      es.onerror = () => {
-        es?.close();
         if (cancelled) return;
-        if (retries >= MAX_RETRIES) {
-          toast({ title: "Connection lost", description: "Please try again." });
-          return;
-        }
-        retries += 1;
-        toast({ title: "Connection issue, retrying…" });
-        const backoff = Math.min(1000 * 2 ** retries, 8000);
-        reconnectTimer = window.setTimeout(connect, backoff);
-      };
+
+        // Open SSE stream
+        es = new EventSource(`${API}/demo/negotiate/stream`);
+        let msgCount = 0;
+        const TOTAL_EXPECTED = 8; // ~8 events for Phase 1
+
+        es.onmessage = (evt) => {
+          if (cancelled) return;
+          try {
+            const msg: BackendMsg = JSON.parse(evt.data);
+
+            setMessages((prev) => [...prev, msg]);
+            msgCount++;
+            setProgress(Math.min(Math.round((msgCount / TOTAL_EXPECTED) * 100), 95));
+
+            if (msg.role === "done") {
+              setProgress(100);
+              setStatus("done");
+              es?.close();
+            }
+          } catch {
+            // ignore malformed events
+          }
+        };
+
+        es.onerror = () => {
+          if (!cancelled) setStatus("error");
+          es?.close();
+        };
+      } catch (err) {
+        if (!cancelled) setStatus("error");
+        console.error("[negotiating]", err);
+      }
     };
 
-    connect();
+    run();
+
     return () => {
       cancelled = true;
       es?.close();
-      if (reconnectTimer) clearTimeout(reconnectTimer);
     };
-  }, [navigate, catchupId]);
+  }, []);
+
+  const members = [
+    { initials: "RA", color: "ketchup-red", label: "Raphaël" },
+    { initials: "MA", color: "mint",        label: "Marie"   },
+    { initials: "TH", color: "sunshine",    label: "Thomas"  },
+  ];
 
   return (
     <Layout className="bg-cream">
@@ -188,34 +177,56 @@ const Negotiating = () => {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="h-2 w-2 rounded-pill bg-ketchup-red animate-pulse" />
-            <span className="text-meta text-ketchup-red">NEGOTIATING · LIVE</span>
+            <span className="text-meta text-ketchup-red">
+              {status === "done" ? "NÉGOCIATION TERMINÉE" : "NÉGOCIATION · LIVE"}
+            </span>
           </div>
           <span className="text-body text-slate tabular-nums">{formatTimer(seconds)}</span>
         </div>
 
-        <h1 className="text-h1 text-navy mt-3">3 agents talking</h1>
+        <h1 className="text-h1 text-navy mt-3">3 agents négocient</h1>
 
-        {/* Avatars row */}
+        {/* Avatars */}
         <div className="mt-4 flex items-center gap-3">
           <div className="flex -space-x-1">
-            <Avatar initials="YO" color="ketchup-red" className="text-white ring-2 ring-cream" />
-            <Avatar initials="MA" color="mint" className="ring-2 ring-cream" />
-            <Avatar initials="TO" color="sunshine" className="ring-2 ring-cream" />
+            {members.map((m) => (
+              <Avatar
+                key={m.initials}
+                initials={m.initials}
+                color={m.color}
+                className={cn(
+                  "ring-2 ring-cream",
+                  m.color === "ketchup-red" && "text-white",
+                )}
+              />
+            ))}
           </div>
-          <span className="text-body text-slate">you · Marie · Tom</span>
+          <span className="text-body text-slate">
+            {members.map((m) => m.label).join(" · ")}
+          </span>
         </div>
 
-        {/* Bubbles */}
+        {/* Messages */}
         <div
           ref={scrollRef}
           className="flex-1 mt-5 -mx-2 px-2 overflow-y-auto flex flex-col gap-3"
         >
-          {messages.map((m) => (
-            <Bubble key={m.id} msg={m} />
+          {messages.length === 0 && status === "running" && (
+            <div className="text-center text-body italic text-slate mt-8 animate-pulse">
+              Connexion aux agents…
+            </div>
+          )}
+          {messages.map((m, i) => (
+            <Bubble key={i} msg={m} />
           ))}
+          {status === "error" && (
+            <div className="text-center text-body text-ketchup-red mt-4">
+              ❌ Erreur de connexion au backend. Le serveur est-il démarré ?
+            </div>
+          )}
         </div>
 
-        {/* Progress + caption */}
+        {/* Progress bar */}
         <div className="mt-4">
           <div className="h-1.5 w-full rounded-pill bg-light-gray overflow-hidden">
             <div
@@ -223,7 +234,13 @@ const Negotiating = () => {
               style={{ width: `${progress}%` }}
             />
           </div>
-          <div className="mt-2 text-center text-body text-slate">{tavilyCaption}</div>
+          <div className="mt-2 text-center text-body text-slate">
+            {status === "done"
+              ? "✅ Créneau trouvé par Gemini"
+              : status === "error"
+              ? "Erreur — vérifier le backend"
+              : "Gemini analyse les agendas…"}
+          </div>
         </div>
       </div>
     </Layout>
