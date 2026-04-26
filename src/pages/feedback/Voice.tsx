@@ -3,86 +3,88 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Mic } from "lucide-react";
 import { Layout } from "@/components/Layout";
 import { Waveform } from "@/components/Waveform";
-import { openVoiceSocket, type VoiceSocketHandle } from "@/lib/voiceSocket";
+import { useProfile } from "@/hooks/useProfile";
+import { openVoiceCall, type VoiceCallHandle } from "@/lib/voiceClient";
 
-const FALLBACK_DELAY_MS = 3000;
+const FALLBACK_DELAY_MS = 4000;
 
 interface RouteState {
-  userId?: string;
   catchupId?: string;
 }
 
 const FeedbackVoice = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { session, profile } = useProfile();
   const state = (location.state ?? {}) as RouteState;
-  const userId = state.userId ?? "demo-user";
-  const catchupId = state.catchupId ?? "demo";
+  void state.catchupId; // reserved for when the WS supports a catchup_id query param
 
   const [active, setActive] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [showWriteFallback, setShowWriteFallback] = useState(false);
-  const socketRef = useRef<VoiceSocketHandle | null>(null);
+  const handleRef = useRef<VoiceCallHandle | null>(null);
 
   const handleStart = () => {
     if (active || connecting) return;
-    const wsBase = import.meta.env.VITE_WS_BASE_URL as string | undefined;
-
-    if (!wsBase) {
-      // No WS configured — surface fallback right away.
+    const userId = session?.user.id ?? profile?.id;
+    if (!userId) {
       setShowWriteFallback(true);
       return;
     }
 
     setConnecting(true);
-    const url = `${wsBase}/ws/voice/feedback/${encodeURIComponent(userId)}?catchup_id=${encodeURIComponent(catchupId)}`;
+    const cancelled = false;
 
-    let cancelled = false;
-    openVoiceSocket(url, {
-      onOpen: () => {
-        if (cancelled) return;
-        setActive(true);
-        setConnecting(false);
-      },
-      onClose: () => {
-        if (cancelled) return;
-        navigate("/home");
-      },
-      onError: (err) => {
-        console.warn("[feedback-voice] socket error", err);
+    openVoiceCall({
+      taskType: "feedback",
+      userId,
+      handlers: {
+        onConnected: () => {
+          if (cancelled) return;
+          setActive(true);
+          setConnecting(false);
+        },
+        onClose: () => {
+          if (cancelled) return;
+          navigate("/home");
+        },
+        onError: (err) => {
+           
+          console.warn("[feedback-voice] error", err);
+          setConnecting(false);
+        },
       },
     })
-      .then((handle) => {
+      .then((h) => {
         if (cancelled) {
-          handle.close();
+          h.close();
           return;
         }
-        socketRef.current = handle;
+        handleRef.current = h;
       })
       .catch((err) => {
-        console.warn("[feedback-voice] failed to open socket", err);
+         
+        console.warn("[feedback-voice] failed to open", err);
         setConnecting(false);
         setShowWriteFallback(true);
       });
 
-    // 3s fallback if the socket never opens.
     window.setTimeout(() => {
-      if (!cancelled && !socketRef.current) {
+      if (!cancelled && !handleRef.current) {
         setShowWriteFallback(true);
       }
     }, FALLBACK_DELAY_MS);
   };
 
-  // Cleanup on unmount.
   useEffect(() => {
     return () => {
-      socketRef.current?.close();
-      socketRef.current = null;
+      handleRef.current?.close();
+      handleRef.current = null;
     };
   }, []);
 
   const handleSkip = () => {
-    socketRef.current?.close();
+    handleRef.current?.close();
     navigate("/home");
   };
 

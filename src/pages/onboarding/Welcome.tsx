@@ -1,10 +1,12 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/Button";
 import { Input } from "@/components/Input";
 import { BottleLogo } from "@/components/BottleLogo";
 import { supabase } from "@/lib/supabase";
+import { devLogin, isDevLoginAvailable } from "@/lib/devLogin";
+import { useProfile } from "@/hooks/useProfile";
 import { toast } from "@/hooks/use-toast";
 
 /** Normalize a phone number to E.164 (digits + leading +). */
@@ -18,8 +20,17 @@ const toE164 = (raw: string) => {
 
 const Welcome = () => {
   const navigate = useNavigate();
+  const { session, isOnboarded, loading } = useProfile();
   const [phone, setPhone] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [devSubmitting, setDevSubmitting] = useState(false);
+  const devLoginEnabled = isDevLoginAvailable();
+
+  // If the user is already signed in, skip the SMS flow entirely.
+  useEffect(() => {
+    if (loading || !session) return;
+    navigate(isOnboarded ? "/home" : "/onboarding/voice-call", { replace: true });
+  }, [loading, session, isOnboarded, navigate]);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -35,6 +46,19 @@ const Welcome = () => {
       toast({ title: "Couldn't send code", description: message, variant: "destructive" });
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDevLogin = async () => {
+    setDevSubmitting(true);
+    try {
+      await devLogin();
+      // The useProfile redirect effect will route us as soon as the session
+      // hydrates — no need to navigate manually.
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Dev login failed";
+      toast({ title: "Dev login failed", description: message, variant: "destructive" });
+      setDevSubmitting(false);
     }
   };
 
@@ -79,6 +103,17 @@ const Welcome = () => {
             <p className="text-meta normal-case tracking-normal text-slate text-center mt-1">
               No password. Just pick up.
             </p>
+
+            {devLoginEnabled && (
+              <button
+                type="button"
+                onClick={handleDevLogin}
+                disabled={devSubmitting}
+                className="mt-2 rounded-pill bg-navy text-cream py-2 text-meta uppercase tracking-wider disabled:opacity-60"
+              >
+                {devSubmitting ? "Signing in…" : "Dev login (skip SMS)"}
+              </button>
+            )}
           </form>
         </div>
       </div>
