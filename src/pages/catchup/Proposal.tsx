@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { Pill } from "@/components/Pill";
@@ -10,6 +11,8 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { ApiError, api } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 const REFUSE_REASONS = [
@@ -19,48 +22,124 @@ const REFUSE_REASONS = [
   { id: "other", label: "Other" },
 ];
 
+interface ProposalRow {
+  id: string;
+  catchup_id: string;
+  venue: string;
+  time: string;
+  activity: string;
+  justification: string;
+  created_at: string;
+}
+
 export default function Proposal() {
   const navigate = useNavigate();
   const location = useLocation();
-  const catchupId = (location.state as { catchupId?: string } | null)?.catchupId ?? "catchup-mock";
+  const queryClient = useQueryClient();
+  const catchupId = (location.state as { catchupId?: string } | null)?.catchupId;
 
   const [refuseOpen, setRefuseOpen] = useState(false);
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
 
-  const handleAccept = () => {
-    // TODO: will POST /catchups/:id/vote with vote=accept then POST /catchups/:id/finalize on phase 6
-    console.log("[mock] accept catchup", catchupId);
-    navigate("/catchup/confirmed", { state: { catchupId } });
-  };
+  const proposalQuery = useQuery<ProposalRow | null>({
+    queryKey: ["catchups", catchupId, "proposal"],
+    enabled: Boolean(catchupId),
+    refetchInterval: (q) => (q.state.data ? false : 1500),
+    queryFn: async () => {
+      try {
+        return await api<ProposalRow>(`/catchups/${catchupId}/proposal`);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) return null;
+        throw err;
+      }
+    },
+  });
 
-  const handleSubmitRefuse = () => {
-    if (!selectedReason) return;
-    // TODO: will POST /catchups/:id/vote with vote=refuse, reason on phase 6
-    console.log("[mock] refuse catchup", catchupId, "reason:", selectedReason);
-    setRefuseOpen(false);
-    navigate("/catchup/negotiating", {
-      state: { catchupId, rejectionReason: selectedReason },
-    });
-  };
+  const acceptMutation = useMutation({
+    mutationFn: () =>
+      api(`/catchups/${catchupId}/vote`, {
+        method: "POST",
+        json: { vote: "accept" },
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["catchups"] });
+      navigate("/catchup/confirmed", { state: { catchupId } });
+    },
+    onError: (err) => {
+      toast({
+        title: "Couldn't accept",
+        description: err instanceof Error ? err.message : "Try again?",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const refuseMutation = useMutation({
+    mutationFn: (reason: string) =>
+      api(`/catchups/${catchupId}/vote`, {
+        method: "POST",
+        json: { vote: "reject", reason },
+      }),
+    onSuccess: async () => {
+      // Drop the stale proposal from the cache so we don't flash it on
+      // /negotiating before the new negotiation produces a fresh one.
+      await queryClient.invalidateQueries({
+        queryKey: ["catchups", catchupId, "proposal"],
+      });
+      queryClient.removeQueries({
+        queryKey: ["catchups", catchupId, "proposal"],
+      });
+      setRefuseOpen(false);
+      navigate("/catchup/negotiating", {
+        state: { catchupId, rejectionReason: selectedReason },
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: "Couldn't refuse",
+        description: err instanceof Error ? err.message : "Try again?",
+        variant: "destructive",
+      });
+    },
+  });
+
+  if (!catchupId) {
+    navigate("/home", { replace: true });
+    return null;
+  }
+
+  const proposal = proposalQuery.data;
+  const isWaiting = proposalQuery.isLoading || (!proposal && proposalQuery.isFetching);
 
   return (
     <div className="min-h-screen bg-white text-navy flex flex-col">
       <div className="flex-1 px-5 pt-10 pb-6 max-w-md mx-auto w-full">
         <p className="text-meta uppercase text-coral mb-3">Proposal ready</p>
-        <h2 className="text-h1 text-navy">Thursday, May 1</h2>
-        <p className="text-body text-slate mt-2">7:30 pm · Le Servan · 11ème</p>
 
-        <Card className="bg-cream border-cream/0 mt-5">
-          <p className="text-meta uppercase text-slate mb-2">Why this place</p>
-          <p className="text-body text-navy leading-relaxed">
-            Modern French. Quiet enough to talk. Marie liked a similar spot last month. 12 min from each of you.
-          </p>
-        </Card>
+        {proposal ? (
+          <>
+            <h2 className="text-h1 text-navy">{proposal.time}</h2>
+            <p className="text-body text-slate mt-2">{proposal.venue}</p>
 
-        <Card className="bg-mint border-mint/0 mt-3 flex items-center justify-between">
-          <p className="text-body text-navy">All 3 agents agreed</p>
-          <Pill className="bg-navy text-cream">Confirmed</Pill>
-        </Card>
+            {proposal.justification && (
+              <Card className="bg-cream border-cream/0 mt-5">
+                <p className="text-meta uppercase text-slate mb-2">Why this place</p>
+                <p className="text-body text-navy leading-relaxed">{proposal.justification}</p>
+              </Card>
+            )}
+
+            <Card className="bg-mint border-mint/0 mt-3 flex items-center justify-between">
+              <p className="text-body text-navy">All agents agreed</p>
+              <Pill className="bg-navy text-cream">Locked in</Pill>
+            </Card>
+          </>
+        ) : isWaiting ? (
+          <div className="mt-10 text-body text-slate">Waiting for the agents to land a deal…</div>
+        ) : (
+          <div className="mt-10 text-body text-ketchup-red">
+            No proposal yet. Try refreshing or relaunching the catch-up.
+          </div>
+        )}
       </div>
 
       <div className="px-5 pb-8 pt-4 max-w-md mx-auto w-full">
@@ -69,15 +148,17 @@ export default function Proposal() {
             variant="ghost"
             className="flex-1 border border-light-gray"
             onClick={() => setRefuseOpen(true)}
+            disabled={!proposal}
           >
             Refuse
           </Button>
           <Button
             variant="primary"
             className="basis-0 grow-[1.4]"
-            onClick={handleAccept}
+            onClick={() => acceptMutation.mutate()}
+            disabled={!proposal || acceptMutation.isPending}
           >
-            Accept
+            {acceptMutation.isPending ? "Saving…" : "Accept"}
           </Button>
         </div>
       </div>
@@ -112,11 +193,11 @@ export default function Proposal() {
           </div>
           <Button
             fullWidth
-            disabled={!selectedReason}
-            onClick={handleSubmitRefuse}
+            disabled={!selectedReason || refuseMutation.isPending}
+            onClick={() => selectedReason && refuseMutation.mutate(selectedReason)}
             className="mt-2"
           >
-            Send feedback
+            {refuseMutation.isPending ? "Sending…" : "Send feedback"}
           </Button>
         </DialogContent>
       </Dialog>

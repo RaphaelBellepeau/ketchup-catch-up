@@ -118,6 +118,9 @@ export interface OpenVoiceCallOptions {
   taskType: "onboarding" | "feedback";
   /** Authenticated user id. */
   userId: string;
+  /** Optional catchup id — passed to the backend to personalise the
+      feedback prompt and persist the result against the right catchup. */
+  catchupId?: string;
   /** Spoken language sent in the WS start handshake. Defaults to "en". */
   language?: "en" | "fr" | "es" | "de" | "pt";
   /** TTS speed multiplier (0.5..2.0). Defaults to 1.0. */
@@ -154,6 +157,7 @@ function rms(analyser: AnalyserNode, buffer: Uint8Array): number {
 export async function openVoiceCall({
   taskType,
   userId,
+  catchupId,
   language = "en",
   speed = 1.0,
   handlers = {},
@@ -240,9 +244,12 @@ export async function openVoiceCall({
   //    is fully initialized so we can immediately negotiate the start frame.
   //    NOTE: do NOT set ws.binaryType — SyncedAudioPlayer expects Blob frames
   //    (which is the default).
-  ws = new WebSocket(
-    `${wsBase}/ws/voice/${encodeURIComponent(taskType)}/${encodeURIComponent(userId)}`,
-  );
+  const wsUrl = (() => {
+    const base = `${wsBase}/ws/voice/${encodeURIComponent(taskType)}/${encodeURIComponent(userId)}`;
+    if (!catchupId) return base;
+    return `${base}?catchup_id=${encodeURIComponent(catchupId)}`;
+  })();
+  ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
     isRunning = true;

@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { Phone } from "lucide-react";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/Button";
 import { Avatar } from "@/components/Avatar";
@@ -8,6 +9,7 @@ import { useGroups, type GroupSummary } from "@/hooks/useGroups";
 import { useCatchups, type CatchupRow } from "@/hooks/useCatchups";
 
 const UPCOMING_STATUSES = "negotiating,proposed,accepted";
+const PAST_STATUSES = "done";
 
 function getInitials(name: string, fallback: string): string {
   const cleaned = name.trim();
@@ -59,6 +61,7 @@ const Home = () => {
   const { profile } = useProfile();
   const groupsQuery = useGroups();
   const upcomingQuery = useCatchups({ status: UPCOMING_STATUSES });
+  const pastQuery = useCatchups({ status: PAST_STATUSES });
 
   const name = profile?.name ?? "";
   const phone = profile?.phone ?? "";
@@ -67,6 +70,10 @@ const Home = () => {
 
   const upcoming = upcomingQuery.data?.[0] ?? null;
   const groups = groupsQuery.data ?? [];
+  // "Pending debriefs" = past events the agent hasn't heard back about yet.
+  // The next one to show is the most recent past catchup without feedback.
+  const pendingDebrief =
+    (pastQuery.data ?? []).find((c) => !c.has_my_feedback) ?? null;
   const isLoading = groupsQuery.isLoading || upcomingQuery.isLoading;
 
   return (
@@ -77,10 +84,63 @@ const Home = () => {
             <p className="text-meta text-coral uppercase">Home</p>
             <h1 className="text-h1 text-navy mt-1">Hi {firstName}</h1>
           </div>
-          <Avatar initials={initials} color="ketchup-red" size="lg" className="text-white" />
+          <button
+            type="button"
+            onClick={() => navigate("/memory")}
+            aria-label="Open your agent's memory"
+            className="relative rounded-pill active:scale-95 transition-transform"
+          >
+            <Avatar
+              initials={initials}
+              color="ketchup-red"
+              size="lg"
+              className="text-white"
+            />
+            {pendingDebrief && (
+              <span
+                className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-pill bg-mint ring-2 ring-cream"
+                aria-hidden="true"
+              />
+            )}
+          </button>
         </div>
 
         <p className="text-body text-slate mt-2">Anyone you want to see soon?</p>
+
+        {/* Incoming-call style debrief card. Shown when the user has at
+            least one past event the agent hasn't debriefed yet. */}
+        {pendingDebrief && (
+          <button
+            type="button"
+            onClick={() =>
+              navigate("/feedback/voice", {
+                state: { catchupId: pendingDebrief.id },
+              })
+            }
+            className="mt-5 w-full text-left rounded-card bg-ketchup-red text-cream p-5 shadow-lg active:scale-[0.99] transition-transform"
+            aria-label="Pick up your agent's call"
+          >
+            <div className="flex items-center gap-3">
+              <span className="relative inline-flex w-10 h-10 rounded-pill bg-cream/15 items-center justify-center shrink-0">
+                <span className="absolute inset-0 rounded-pill bg-cream/20 animate-ping" aria-hidden="true" />
+                <Phone className="w-5 h-5 text-cream relative" strokeWidth={2.5} />
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-meta uppercase tracking-wider text-cream/80">
+                  Incoming · your agent
+                </p>
+                <p className="text-h2 text-cream mt-0.5 truncate">
+                  How was {pendingDebrief.proposal?.venue || "it"}?
+                </p>
+                <p className="text-body text-cream/85 mt-0.5 truncate">
+                  {pendingDebrief.proposal?.time
+                    ? `${pendingDebrief.proposal.time} · tap to pick up`
+                    : "Tap to pick up"}
+                </p>
+              </div>
+            </div>
+          </button>
+        )}
 
         {/* Coming up */}
         {upcoming ? (

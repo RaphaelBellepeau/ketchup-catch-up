@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_base_url: str = ""
     llm_model: str = "gemini-2.5-flash"
+    # Lighter model used for tasks that don't need extended reasoning and
+    # would otherwise be truncated by Gemini Flash's thinking budget
+    # (e.g. structured extraction over long inputs). Empty → fall back to
+    # `llm_model`.
+    llm_lite_model: str = ""
 
     # Google Calendar OAuth
     google_calendar_client_id: str = ""

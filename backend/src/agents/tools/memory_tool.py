@@ -1,57 +1,27 @@
-"""Memory tool for agents to read and update user knowledge."""
+"""Memory access for negotiation agents.
+
+For phase 1 we read directly from the `memories` table (Supabase). The
+function is intentionally async to match the rest of the stack — even
+though supabase-py is sync underneath, we wrap to fit the orchestrator.
+"""
 
 import logging
+
+from src.services import supabase_client as db
 
 logger = logging.getLogger(__name__)
 
 
-def get_user_memories(
-    user_id: str,
-    scope: str = "all",
-) -> dict:
-    """Retrieve what the agent knows about its user.
+async def get_user_memories_text(user_id: str) -> list[dict]:
+    """Return the user's memory rows ready for prompt injection.
 
-    Args:
-        user_id: The user to look up.
-        scope: Filter by scope — "cuisine", "schedule", "social", or "all".
-
-    Returns:
-        dict with status and a list of memory entries.
+    Each row has at minimum `scope` and `content` — the prompt builder
+    just bullets them.
     """
     try:
-        # TODO: read from Supabase memories table
-        # For now, return structure for demo
-        return {
-            "status": "success",
-            "memories": [],
-            "summary": "Pas encore de mémoire pour cet utilisateur.",
-        }
-    except Exception as e:
-        logger.error(f"Memory read failed for user {user_id}: {e}")
-        return {"status": "error", "error": str(e), "memories": []}
-
-
-def save_user_memory(
-    user_id: str,
-    scope: str,
-    content: str,
-    source: str = "agent",
-) -> dict:
-    """Save a new memory about the user.
-
-    Args:
-        user_id: The user this memory is about.
-        scope: Category — "cuisine", "schedule", "social", "general".
-        content: The memory content in natural language.
-        source: Where this memory came from — "onboarding", "feedback", "agent".
-
-    Returns:
-        dict with status.
-    """
-    try:
-        # TODO: write to Supabase memories table
-        logger.info(f"Memory saved: user={user_id} scope={scope} content={content[:50]}...")
-        return {"status": "success"}
-    except Exception as e:
-        logger.error(f"Memory save failed: {e}")
-        return {"status": "error", "error": str(e)}
+        memories = await db.get_memories(user_id)
+        # Skip anything missing meaningful content.
+        return [m for m in memories if (m.get("content") or "").strip()]
+    except Exception:
+        logger.exception("Failed to load memories for user=%s", user_id)
+        return []

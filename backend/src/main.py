@@ -27,7 +27,10 @@ from src.routers import (  # noqa: E402
     memories,
     users,
 )
-from src.voice.persist import persist_onboarding_memories  # noqa: E402
+from src.voice.persist import (  # noqa: E402
+    persist_feedback_memories,
+    persist_onboarding_memories,
+)
 from src.voice.service import voice_service  # noqa: E402
 from src.voice.tasks import build_task  # noqa: E402
 
@@ -93,11 +96,20 @@ async def ws_voice(websocket: WebSocket, task_type: str, user_id: str):
     """Unified Gradbot voice session for onboarding and feedback.
 
     Gradbot accepts the WebSocket itself — do NOT call websocket.accept() here.
+    Optional query params:
+      - ``catchup_id``  (feedback only) — drives the personalised prompt and
+        the post-session persistence
     """
     logger.info("Voice session starting: task=%s user=%s", task_type, user_id)
 
+    catchup_id = websocket.query_params.get("catchup_id") or None
+    context: dict = {}
+
+    if task_type == "feedback" and catchup_id:
+        context = await _build_feedback_context(catchup_id, user_id)
+
     try:
-        task = build_task(task_type, user_id)
+        task = build_task(task_type, user_id, context=context)
     except ValueError as e:
         await websocket.close(code=1008, reason=str(e))
         return
@@ -106,12 +118,71 @@ async def ws_voice(websocket: WebSocket, task_type: str, user_id: str):
 
     if result.success and task_type == "onboarding":
         await persist_onboarding_memories(user_id, result.extracted_data)
+    elif result.success and task_type == "feedback":
+        await persist_feedback_memories(
+            user_id=user_id,
+            catchup_id=catchup_id,
+            context=context,
+            extracted_data=result.extracted_data,
+        )
     elif not result.success:
         logger.warning(
             "Voice session ended without extracted data: task=%s user=%s",
             task_type,
             user_id,
         )
+
+
+async def _build_feedback_context(catchup_id: str, user_id: str) -> dict:
+    """Pull the catchup, latest proposal, member names, and the user's
+    accumulated memories so the feedback agent can rebound on what it
+    already knows and refine its model.
+
+    The current user is NEVER included in `friend_names` — the agent is
+    talking TO them, so listing them as a "friend" would lead to weird
+    third-person phrasing like "How did Theo and Léa find it?" while
+    Theo is the one being asked.
+    """
+    from src.services import supabase_client as db  # local import — startup-cost
+
+    catchup = await db.get_catchup(catchup_id)
+    if not catchup:
+        return {}
+    proposal = await db.get_proposal(catchup_id)
+
+    venue = (proposal or {}).get("venue") or "the venue"
+    time_label = (proposal or {}).get("time") or ""
+    activity = (proposal or {}).get("activity") or catchup.get("vibe") or "catch-up"
+
+    members = await db.get_group_members(catchup["group_id"])
+    user_first_name = ""
+    friend_names: list[str] = []
+    for m in members:
+        u = (m.get("users") or {})
+        name = (u.get("name") or "").strip()
+        if not name:
+            continue
+        first = name.split()[0]
+        if m.get("user_id") == user_id:
+            user_first_name = first
+        else:
+            friend_names.append(first)
+
+    memories = await db.get_memories(user_id)
+    memory_lines = [
+        f"- {m['content']}" for m in memories if (m.get("content") or "").strip()
+    ]
+    memory_text = "\n".join(memory_lines) or "(no prior memories yet)"
+
+    return {
+        "catchup_id": catchup_id,
+        "venue": venue,
+        "time_label": time_label,
+        "activity": activity,
+        "friend_names": friend_names,
+        "user_first_name": user_first_name,
+        "memory_text": memory_text,
+    }
 
 
 # ── Gradbot static assets (must come AFTER routers) ────

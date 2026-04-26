@@ -30,6 +30,8 @@ export interface CatchupRow {
     justification: string;
     created_at: string;
   } | null;
+  /** True when the current user has already submitted feedback for this catchup. */
+  has_my_feedback: boolean;
 }
 
 interface UseCatchupsOptions {

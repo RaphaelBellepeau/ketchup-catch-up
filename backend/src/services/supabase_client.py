@@ -357,9 +357,23 @@ async def get_user_catchups(
         if cid not in latest_proposal:
             latest_proposal[cid] = p
 
+    # "Has the caller debriefed yet?" — used by the Home page to surface
+    # pending feedback prompts on past events.
+    feedbacks_data = (
+        client.table("feedbacks")
+        .select("catchup_id")
+        .eq("user_id", user_id)
+        .in_("catchup_id", catchup_ids)
+        .execute()
+        .data
+        or []
+    )
+    feedback_catchup_ids = {f["catchup_id"] for f in feedbacks_data}
+
     for c in catchups:
         c["group"] = groups_by_id.get(c["group_id"])
         c["proposal"] = latest_proposal.get(c["id"])
+        c["has_my_feedback"] = c["id"] in feedback_catchup_ids
 
     return catchups
 
@@ -404,6 +418,18 @@ async def create_negotiation(catchup_id: str) -> dict:
         .execute()
     )
     return result.data[0] if result.data else {}
+
+
+async def get_latest_negotiation(catchup_id: str) -> dict | None:
+    """Return the most recent negotiation row for a catchup."""
+    client = get_client()
+    return _maybe_single(
+        client.table("negotiations")
+        .select("*")
+        .eq("catchup_id", catchup_id)
+        .order("started_at", desc=True)
+        .limit(1)
+    )
 
 
 async def get_negotiation_messages(catchup_id: str) -> list[dict]:
@@ -465,6 +491,17 @@ async def save_vote(catchup_id: str, user_id: str, vote: str, reason: str) -> di
     }
     result = client.table("votes").upsert(data, on_conflict="catchup_id,user_id").execute()
     return result.data[0] if result.data else {}
+
+
+async def get_votes(catchup_id: str) -> list[dict]:
+    client = get_client()
+    result = (
+        client.table("votes")
+        .select("*")
+        .eq("catchup_id", catchup_id)
+        .execute()
+    )
+    return result.data or []
 
 
 # ── Memories ───────────────────────────────────────────

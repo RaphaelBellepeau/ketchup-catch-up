@@ -34,6 +34,8 @@ GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 FREEBUSY_URL = "https://www.googleapis.com/calendar/v3/freeBusy"
+EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+DEFAULT_TIMEZONE = "Europe/Paris"
 
 # Short TTL for the OAuth state JWT — the consent dance should be fast.
 STATE_TTL_SECONDS = 600
@@ -237,6 +239,85 @@ async def disconnect(user_id: str) -> bool:
     return True
 
 
+async def push_catchup_to_calendars(catchup_id: str) -> dict:
+    """Create a Google Calendar event for every group member who has
+    connected their calendar. Best-effort: failures for one user don't
+    block the others.
+
+    Returns ``{"created": int, "skipped": int, "errors": int}``.
+    """
+    from src.services import supabase_client as db  # avoid circular import
+
+    catchup = await db.get_catchup(catchup_id)
+    if not catchup:
+        return {"created": 0, "skipped": 0, "errors": 0}
+    proposal = await db.get_proposal(catchup_id)
+    if not proposal:
+        return {"created": 0, "skipped": 0, "errors": 0}
+
+    start_raw = proposal.get("start_at")
+    if not start_raw:
+        logger.info("No start_at on proposal — skipping calendar push")
+        return {"created": 0, "skipped": 0, "errors": 0}
+
+    try:
+        start_at = datetime.fromisoformat(str(start_raw).replace("Z", "+00:00"))
+    except ValueError:
+        logger.warning("Could not parse proposal.start_at=%r", start_raw)
+        return {"created": 0, "skipped": 0, "errors": 0}
+
+    try:
+        duration_minutes = int(proposal.get("duration_minutes") or 120)
+    except (TypeError, ValueError):
+        duration_minutes = 120
+    end_at = start_at + timedelta(minutes=duration_minutes)
+
+    members = await db.get_group_members(catchup["group_id"])
+    group = await db.get_group(catchup["group_id"]) or {}
+    group_name = group.get("name") or "your group"
+
+    venue = proposal.get("venue") or "TBD"
+    activity = proposal.get("activity") or "Catch-up"
+    title = f"{activity.title()} with {group_name} — {venue}"
+    description_lines = [
+        f"Venue: {venue}",
+        f"Why: {proposal.get('justification') or '—'}",
+        "Planned via Catch-Up.",
+    ]
+    description = "\n".join(description_lines)
+
+    created = skipped = errors = 0
+    for m in members:
+        user_id = m.get("user_id")
+        if not user_id:
+            continue
+        try:
+            res = await create_event(
+                user_id=user_id,
+                title=title,
+                start_at=start_at,
+                end_at=end_at,
+                description=description,
+                location=venue,
+            )
+            status = res.get("status")
+            if status == "success":
+                created += 1
+            elif status == "skipped":
+                skipped += 1
+            else:
+                errors += 1
+        except Exception:
+            logger.exception("Calendar push failed for user=%s", user_id)
+            errors += 1
+
+    logger.info(
+        "Calendar push for catchup=%s: created=%d skipped=%d errors=%d",
+        catchup_id, created, skipped, errors,
+    )
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
 async def get_busy_slots(
     user_id: str,
     time_min: datetime,
@@ -276,19 +357,81 @@ async def get_busy_slots(
     return busy
 
 
-# Backwards-compatible stub kept until the agents migrate to the new API.
 async def create_event(
     user_id: str,
+    *,
     title: str,
-    start_time: str,
-    end_time: str,
+    start_at: datetime,
+    end_at: datetime,
+    description: str = "",
     location: str = "",
+    timezone: str = DEFAULT_TIMEZONE,
     attendees: list[str] | None = None,
 ) -> dict:
-    """TODO: implement event creation when negotiations finalize."""
-    logger.info("Calendar event creation stub: %s for user %s", title, user_id)
-    return {
-        "status": "stub",
-        "event_id": None,
-        "message": f"Event '{title}' would be created",
+    """Create an event on the user's primary Google Calendar.
+
+    Returns ``{"status": "success" | "skipped" | "error", "event_id": str|None,
+    "html_link": str|None, "message": str}``. ``skipped`` means the user
+    has not connected their calendar — callers should treat that as a
+    soft no-op, not a failure.
+    """
+    access_token = await _ensure_access_token(user_id)
+    if not access_token:
+        return {
+            "status": "skipped",
+            "event_id": None,
+            "html_link": None,
+            "message": "Calendar not connected",
+        }
+
+    body: dict = {
+        "summary": title,
+        "start": {"dateTime": _isoformat_with_tz(start_at), "timeZone": timezone},
+        "end": {"dateTime": _isoformat_with_tz(end_at), "timeZone": timezone},
     }
+    if description:
+        body["description"] = description
+    if location:
+        body["location"] = location
+    if attendees:
+        body["attendees"] = [{"email": a} for a in attendees if a]
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(EVENTS_URL, headers=headers, json=body)
+    except Exception as exc:
+        logger.exception("Calendar event POST failed for user=%s", user_id)
+        return {"status": "error", "event_id": None, "html_link": None, "message": str(exc)}
+
+    if resp.status_code not in (200, 201):
+        logger.warning(
+            "Calendar event create non-2xx user=%s status=%s body=%s",
+            user_id, resp.status_code, resp.text[:300],
+        )
+        return {
+            "status": "error",
+            "event_id": None,
+            "html_link": None,
+            "message": f"Google returned {resp.status_code}",
+        }
+
+    data = resp.json()
+    return {
+        "status": "success",
+        "event_id": data.get("id"),
+        "html_link": data.get("htmlLink"),
+        "message": "Event created",
+    }
+
+
+def _isoformat_with_tz(dt: datetime) -> str:
+    """Produce an RFC3339 datetime string Google's API likes."""
+    if dt.tzinfo is None:
+        # Treat naive datetimes as already in the user's timezone — Google
+        # uses the `timeZone` field next to it.
+        return dt.isoformat()
+    return dt.isoformat()
