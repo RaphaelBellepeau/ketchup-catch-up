@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     google_calendar_client_id: str = ""
     google_calendar_client_secret: str = ""
 
+    # Public URLs — used to build redirect_uri for the OAuth callback and to
+    # bounce the user back to the frontend after the consent dance.
+    backend_base_url: str = "http://localhost:8000"
+    frontend_base_url: str = "http://localhost:8080"
+
     # Server
     port: int = 8000
     env: str = "development"

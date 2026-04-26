@@ -1,25 +1,53 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Calendar, User } from "lucide-react";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/Button";
 import { Pill } from "@/components/Pill";
+import { useCalendarStatus } from "@/hooks/useCalendarStatus";
+import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 const Permissions = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [contactsLinked, setContactsLinked] = useState(false);
-  // Calendar is "Linked" by default per design (mock state).
-  const [calendarLinked] = useState(true);
 
-  const triggerCalendarOAuth = () => {
-    // TODO: will GET /calendar/auth-link and redirect to returned URL on phase 6
-    console.log("[permissions] triggerCalendarOAuth → placeholder");
+  const {
+    isConnected: calendarConnected,
+    isLoading: calendarLoading,
+    isConnecting: calendarConnecting,
+    connect: connectCalendar,
+    refetch: refetchCalendar,
+  } = useCalendarStatus();
+
+  // Pick up the `?calendar=connected` (or `=error`) marker the backend adds
+  // when bouncing the user back here after the OAuth dance.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const flag = params.get("calendar");
+    if (!flag) return;
+    if (flag === "connected") {
+      toast({ title: "Calendar linked", description: "Google Calendar connected." });
+      refetchCalendar();
+    } else if (flag === "error") {
+      toast({
+        title: "Calendar connection failed",
+        description: "We couldn't link your calendar. Try again?",
+        variant: "destructive",
+      });
+    }
+    // Strip the query param so a refresh doesn't re-toast.
+    navigate(location.pathname, { replace: true });
+  }, [location.search, location.pathname, navigate, refetchCalendar]);
+
+  const handleConnectCalendar = () => {
+    if (calendarConnected || calendarConnecting) return;
+    connectCalendar();
   };
 
   const allowContacts = () => {
-    // TODO: will POST /users/sync-contacts on phase 6
-    console.log("[permissions] allowContacts → placeholder");
+    // TODO: phase 6 — POST /users/sync-contacts with the user's address book.
     setContactsLinked(true);
   };
 
@@ -34,10 +62,11 @@ const Permissions = () => {
           {/* Google Calendar */}
           <button
             type="button"
-            onClick={triggerCalendarOAuth}
+            onClick={handleConnectCalendar}
+            disabled={calendarConnecting || calendarLoading}
             className={cn(
               "w-full text-left rounded-card bg-sky p-4 flex items-center gap-3",
-              "transition-transform active:scale-[0.99]",
+              "transition-transform active:scale-[0.99] disabled:opacity-70",
             )}
           >
             <span className="w-11 h-11 rounded-full bg-white flex items-center justify-center shrink-0">
@@ -45,10 +74,16 @@ const Permissions = () => {
             </span>
             <span className="flex-1 min-w-0">
               <span className="block text-h3 text-navy">Google Calendar</span>
-              <span className="block text-body text-slate">Read your free slots</span>
+              <span className="block text-body text-slate">
+                Read your free slots
+              </span>
             </span>
-            <Pill tone={calendarLinked ? "mint" : "neutral"}>
-              {calendarLinked ? "Linked" : "Connect"}
+            <Pill tone={calendarConnected ? "mint" : "neutral"}>
+              {calendarConnecting
+                ? "Opening…"
+                : calendarConnected
+                  ? "Linked"
+                  : "Connect"}
             </Pill>
           </button>
 

@@ -43,6 +43,101 @@ async def find_users_by_phones(phones: list[str]) -> list[dict]:
     return result.data or []
 
 
+async def list_other_users(user_id: str) -> list[dict]:
+    """Every user except the caller. Hackathon stand-in for contact sync."""
+    client = get_client()
+    result = (
+        client.table("users")
+        .select("id, name, phone")
+        .neq("id", user_id)
+        .order("name")
+        .execute()
+    )
+    return result.data or []
+
+
+async def update_user(user_id: str, data: dict) -> dict | None:
+    """Update writable fields on a user row. Silently drops unknown keys."""
+    allowed = {k: v for k, v in data.items() if k in ("name",)}
+    if not allowed:
+        return await get_user(user_id)
+    client = get_client()
+    result = (
+        client.table("users").update(allowed).eq("id", user_id).execute()
+    )
+    return result.data[0] if result.data else None
+
+
+async def mark_user_onboarded(user_id: str) -> dict | None:
+    """Set users.onboarded_at = now() for the given user.
+
+    Idempotent — calling twice just refreshes the timestamp, which is fine.
+    """
+    client = get_client()
+    result = (
+        client.table("users")
+        .update({"onboarded_at": "now()"})
+        .eq("id", user_id)
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
+# ── Google OAuth tokens ────────────────────────────────
+
+async def get_calendar_tokens(user_id: str) -> dict | None:
+    client = get_client()
+    return _maybe_single(
+        client.table("google_oauth_tokens").select("*").eq("user_id", user_id)
+    )
+
+
+async def save_calendar_tokens(
+    user_id: str,
+    access_token: str,
+    refresh_token: str,
+    expires_at: str,
+    scopes: list[str],
+) -> dict | None:
+    client = get_client()
+    payload = {
+        "user_id": user_id,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "expires_at": expires_at,
+        "scopes": scopes,
+        "updated_at": "now()",
+    }
+    result = (
+        client.table("google_oauth_tokens")
+        .upsert(payload, on_conflict="user_id")
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
+async def update_calendar_access_token(
+    user_id: str, access_token: str, expires_at: str,
+) -> dict | None:
+    client = get_client()
+    result = (
+        client.table("google_oauth_tokens")
+        .update({
+            "access_token": access_token,
+            "expires_at": expires_at,
+            "updated_at": "now()",
+        })
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
+async def delete_calendar_tokens(user_id: str) -> None:
+    client = get_client()
+    client.table("google_oauth_tokens").delete().eq("user_id", user_id).execute()
+
+
 # ── Friends ─────────────────────────────────────────────
 
 async def get_friends(user_id: str) -> list[dict]:
@@ -86,6 +181,10 @@ async def delete_friend(user_id: str, friend_id: str) -> bool:
 # ── Groups ──────────────────────────────────────────────
 
 async def get_user_groups(user_id: str) -> list[dict]:
+    """List groups the user belongs to, enriched with member_count and the
+    timestamp of the most recent catchup activity (used by the Home page
+    to show an Active/Idle pill).
+    """
     client = get_client()
     memberships = (
         client.table("group_members")
@@ -96,8 +195,46 @@ async def get_user_groups(user_id: str) -> list[dict]:
     group_ids = [m["group_id"] for m in (memberships.data or [])]
     if not group_ids:
         return []
-    result = client.table("groups").select("*").in_("id", group_ids).execute()
-    return result.data or []
+    groups = client.table("groups").select("*").in_("id", group_ids).execute().data or []
+    if not groups:
+        return []
+
+    members = (
+        client.table("group_members")
+        .select("group_id, user_id")
+        .in_("group_id", group_ids)
+        .execute()
+        .data
+        or []
+    )
+    counts: dict[str, int] = {}
+    for m in members:
+        counts[m["group_id"]] = counts.get(m["group_id"], 0) + 1
+
+    catchups = (
+        client.table("catchups")
+        .select("group_id, status, created_at")
+        .in_("group_id", group_ids)
+        .order("created_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
+    last_activity: dict[str, str] = {}
+    has_open: dict[str, bool] = {}
+    for c in catchups:
+        gid = c["group_id"]
+        if gid not in last_activity:
+            last_activity[gid] = c["created_at"]
+        if c["status"] not in ("done", "cancelled") and gid not in has_open:
+            has_open[gid] = True
+
+    for g in groups:
+        g["member_count"] = counts.get(g["id"], 0)
+        g["last_activity_at"] = last_activity.get(g["id"])
+        g["has_open_catchup"] = has_open.get(g["id"], False)
+
+    return groups
 
 
 async def create_group(created_by: str, name: str, member_ids: list[str]) -> dict:
@@ -159,6 +296,13 @@ async def delete_group(group_id: str) -> None:
 async def get_user_catchups(
     user_id: str, status: str = "", group_id: str = ""
 ) -> list[dict]:
+    """List catchups visible to a user, enriched with the parent group's
+    name and the most recent proposal (if any) — so the Home screen can
+    render upcoming items in one round-trip.
+
+    Status filter accepts either a single value (`?status=proposed`) or a
+    comma-separated list (`?status=proposed,accepted`).
+    """
     client = get_client()
     group_ids_result = (
         client.table("group_members")
@@ -172,12 +316,52 @@ async def get_user_catchups(
 
     query = client.table("catchups").select("*").in_("group_id", group_ids)
     if status:
-        query = query.eq("status", status)
+        statuses = [s.strip() for s in status.split(",") if s.strip()]
+        if len(statuses) == 1:
+            query = query.eq("status", statuses[0])
+        else:
+            query = query.in_("status", statuses)
     if group_id:
         query = query.eq("group_id", group_id)
     query = query.order("created_at", desc=True)
-    result = query.execute()
-    return result.data or []
+    catchups = query.execute().data or []
+    if not catchups:
+        return []
+
+    # Bulk-load related groups and proposals so we don't N+1.
+    needed_group_ids = list({c["group_id"] for c in catchups})
+    catchup_ids = [c["id"] for c in catchups]
+
+    groups_data = (
+        client.table("groups")
+        .select("id, name")
+        .in_("id", needed_group_ids)
+        .execute()
+        .data
+        or []
+    )
+    groups_by_id = {g["id"]: g for g in groups_data}
+
+    proposals_data = (
+        client.table("proposals")
+        .select("*")
+        .in_("catchup_id", catchup_ids)
+        .order("created_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
+    latest_proposal: dict[str, dict] = {}
+    for p in proposals_data:
+        cid = p["catchup_id"]
+        if cid not in latest_proposal:
+            latest_proposal[cid] = p
+
+    for c in catchups:
+        c["group"] = groups_by_id.get(c["group_id"])
+        c["proposal"] = latest_proposal.get(c["id"])
+
+    return catchups
 
 
 async def create_catchup(data: dict) -> dict:

@@ -3,7 +3,7 @@ llm:
 
 tts:
   padding_bonus: 0.0
-  rewrite_rules: "fr"
+  rewrite_rules: "en"
 
 stt:
   flush_duration_s: 0.5

@@ -1,6 +1,5 @@
 """VoiceService — unified Gradbot WebSocket handler."""
 
-import json
 import logging
 import time
 
@@ -13,10 +12,10 @@ logger = logging.getLogger(__name__)
 
 class VoiceService:
     """Handles Gradbot voice sessions for any task type.
-    
+
     The same class handles onboarding, feedback, and any future voice task.
     Only the VoiceTask config changes (prompt, schema, context).
-    
+
     Future: add handle_twilio_session() for phone calls — same logic,
     different audio format (ulaw 8kHz instead of OggOpus).
     """
@@ -36,43 +35,70 @@ class VoiceService:
         tools = [
             gradbot.ToolDef(
                 "save_result",
-                "Save the extracted information. Call when you have gathered enough data from the conversation.",
+                (
+                    "Save the extracted information from the user. "
+                    "Call this tool ONLY when you have gathered enough data "
+                    "(at minimum the required fields)."
+                ),
                 task.output_schema,  # already a JSON string from tasks.py
             ),
         ]
 
+        def _session_kwargs(extra: dict) -> dict:
+            """Merge YAML session_kwargs with explicit overrides — explicit wins."""
+            merged = {**cfg.session_kwargs, **extra}
+            # CRITICAL: silence_timeout_s must always be 0.0 — never let YAML override.
+            merged["silence_timeout_s"] = 0.0
+            return merged
+
         def on_start(msg: dict) -> gradbot.SessionConfig:
-            return gradbot.SessionConfig(
+            session_kwargs = _session_kwargs({
+                "rewrite_rules": task.language,  # language code string for TTS
+                "assistant_speaks_first": True,
+            })
+            logger.info(
+                "Voice on_start: task=%s user=%s start_msg=%s session_kwargs=%s",
+                task.task_type, task.user_id, msg, session_kwargs,
+            )
+            cfg_obj = gradbot.SessionConfig(
                 voice_id=task.voice_id,
                 instructions=task.system_prompt,
-                language=gradbot.LANGUAGES.get(task.language, gradbot.Lang.Fr),
+                language=gradbot.LANGUAGES.get(task.language, gradbot.Lang.En),
                 tools=tools,
-                assistant_speaks_first=True,
-                silence_timeout_s=0.0,  # CRITICAL: avoid agent re-prompting itself
-                rewrite_rules=task.language,  # language code string for TTS
-                **cfg.session_kwargs,  # merge YAML settings (they take priority)
+                **session_kwargs,
             )
+            logger.info(
+                "Voice SessionConfig built: voice_id=%s lang=%s speaks_first=%s "
+                "silence=%s tools=%d",
+                cfg_obj.voice_id, cfg_obj.language, cfg_obj.assistant_speaks_first,
+                cfg_obj.silence_timeout_s, len(cfg_obj.tools or []),
+            )
+            return cfg_obj
 
         async def on_tool_call(handle, input_handle, ws):
             if handle.name == "save_result":
                 # handle.args is ALREADY a dict — do NOT json.loads() it
                 result_data.update(handle.args)
-                await handle.send_json({"status": "saved"})
                 logger.info(
-                    f"Voice data extracted: task={task.task_type} user={task.user_id}"
+                    "Voice data extracted: task=%s user=%s",
+                    task.task_type,
+                    task.user_id,
                 )
+                # Tell the LLM the save worked so it can naturally wrap up
+                # (the prompt instructs it to say a short closing line).
+                await handle.send_json({"status": "saved"})
 
-                # Switch to a goodbye prompt — no more tools needed
-                goodbye_config = gradbot.SessionConfig(
-                    voice_id=task.voice_id,
-                    instructions="L'utilisateur a terminé. Remercie-le chaleureusement et dis au revoir.",
-                    language=gradbot.LANGUAGES.get(task.language, gradbot.Lang.Fr),
-                    tools=[],
-                    assistant_speaks_first=False,
-                    silence_timeout_s=0.0,
-                    **cfg.session_kwargs,
-                )
-                await input_handle.send_config(goodbye_config)
+                # Notify the FRONTEND directly via the WebSocket. The browser
+                # uses this to show a "Information saved ✓" transition while
+                # the agent's closing line plays out, then auto-navigates to
+                # the permissions screen.
+                try:
+                    await ws.send_json({
+                        "type": "event",
+                        "event": f"{task.task_type}_saved",
+                    })
+                except Exception:
+                    logger.warning("Failed to send saved event to client")
             else:
                 await handle.send_error(f"Unknown tool: {handle.name}")
 
@@ -84,12 +110,15 @@ class VoiceService:
                 on_tool_call=on_tool_call,
             )
         except Exception as e:
-            logger.error(f"Gradbot session error: {e}")
+            logger.exception("Gradbot session error: %s", e)
 
         duration = time.time() - start_time
         logger.info(
-            f"Voice session ended: task={task.task_type} user={task.user_id} "
-            f"duration={duration:.1f}s success={bool(result_data)}"
+            "Voice session ended: task=%s user=%s duration=%.1fs success=%s",
+            task.task_type,
+            task.user_id,
+            duration,
+            bool(result_data),
         )
 
         return VoiceTaskResult(

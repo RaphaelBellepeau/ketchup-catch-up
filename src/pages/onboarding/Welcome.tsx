@@ -20,17 +20,27 @@ const toE164 = (raw: string) => {
 
 const Welcome = () => {
   const navigate = useNavigate();
-  const { session, isOnboarded, loading } = useProfile();
+  const { session, profile, isOnboarded, loading } = useProfile();
   const [phone, setPhone] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [devSubmitting, setDevSubmitting] = useState(false);
   const devLoginEnabled = isDevLoginAvailable();
 
-  // If the user is already signed in, skip the SMS flow entirely.
+  // If the user is already signed in, skip the SMS flow and continue from
+  // wherever they left off in the onboarding chain:
+  //   no name        → /onboarding/name
+  //   no onboarded_at → /onboarding/voice-call
+  //   otherwise      → /home
   useEffect(() => {
     if (loading || !session) return;
-    navigate(isOnboarded ? "/home" : "/onboarding/voice-call", { replace: true });
-  }, [loading, session, isOnboarded, navigate]);
+    if (isOnboarded) {
+      navigate("/home", { replace: true });
+    } else if (!profile?.name?.trim()) {
+      navigate("/onboarding/name", { replace: true });
+    } else {
+      navigate("/onboarding/voice-call", { replace: true });
+    }
+  }, [loading, session, profile?.name, isOnboarded, navigate]);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();

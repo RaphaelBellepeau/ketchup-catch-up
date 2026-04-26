@@ -3,9 +3,27 @@ import { Layout } from "@/components/Layout";
 import { Button } from "@/components/Button";
 import { Input } from "@/components/Input";
 import { Avatar } from "@/components/Avatar";
-import { friends, suggestedGroupNames } from "@/data/friends";
+import { useDiscoverableUsers } from "@/hooks/useDiscoverableUsers";
 import { useGroupCreation } from "@/store/groupCreation";
 import { cn } from "@/lib/utils";
+
+const SUGGESTED_GROUP_NAMES = ["The classics", "Bordeaux crew", "EFREI gang"];
+
+const AVATAR_COLORS = ["mint", "sunshine", "lavender", "sky", "coral"];
+function colorFor(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+function initialsFor(name: string, phone: string): string {
+  const trimmed = name.trim();
+  if (trimmed) {
+    const parts = trimmed.split(/\s+/);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+  return phone.slice(-2) || "?";
+}
 
 const NameGroup = () => {
   const navigate = useNavigate();
@@ -13,7 +31,10 @@ const NameGroup = () => {
   const setName = useGroupCreation((s) => s.setName);
   const selected = useGroupCreation((s) => s.selectedFriendIds);
 
-  const selectedFriends = friends.filter((f) => selected.includes(f.id));
+  const usersQuery = useDiscoverableUsers();
+  const selectedFriends = (usersQuery.data ?? []).filter((u) =>
+    selected.includes(u.id),
+  );
 
   return (
     <Layout>
@@ -33,18 +54,20 @@ const NameGroup = () => {
         {selectedFriends.length > 0 && (
           <div className="mt-3 rounded-card bg-cream p-3 flex items-center gap-3">
             <div className="flex -space-x-2">
-              {selectedFriends.slice(0, 5).map((f) => (
+              {selectedFriends.slice(0, 5).map((u) => (
                 <Avatar
-                  key={f.id}
-                  initials={f.initials}
-                  color={f.avatarColor}
+                  key={u.id}
+                  initials={initialsFor(u.name, u.phone)}
+                  color={colorFor(u.id)}
                   size="sm"
                   className="ring-2 ring-cream"
                 />
               ))}
             </div>
             <div className="text-body text-slate truncate">
-              {selectedFriends.map((f) => f.name.split(" ")[0]).join(" · ")}
+              {selectedFriends
+                .map((u) => (u.name?.trim().split(/\s+/)[0]) || u.phone)
+                .join(" · ")}
             </div>
           </div>
         )}
@@ -52,7 +75,7 @@ const NameGroup = () => {
         <div className="mt-6 border-t border-light-gray pt-4">
           <div className="text-meta text-coral">SUGGESTED BY YOUR AGENT</div>
           <div className="mt-3 flex flex-wrap gap-2">
-            {suggestedGroupNames.map((s) => {
+            {SUGGESTED_GROUP_NAMES.map((s) => {
               const active = s === name;
               return (
                 <button

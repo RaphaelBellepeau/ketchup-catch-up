@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Mic, X } from "lucide-react";
+import { Check, Mic, X } from "lucide-react";
 import { LiveLevels } from "@/components/LiveLevels";
 import { useProfile } from "@/hooks/useProfile";
 import {
@@ -11,7 +11,13 @@ import {
 
 const FALLBACK_DELAY_MS = 4000;
 
-type CallState = "idle" | "connecting" | "live" | "mic-denied" | "error";
+type CallState =
+  | "idle"
+  | "connecting"
+  | "live"
+  | "completed"
+  | "mic-denied"
+  | "error";
 
 const VoiceCall = () => {
   const navigate = useNavigate();
@@ -30,17 +36,31 @@ const VoiceCall = () => {
   // forcing the open effect to re-run on every render.
   const refetchRef = useRef(refetch);
   const navigateRef = useRef(navigate);
+  // Tracks which agent turn the current caption belongs to. When the agent
+  // starts a new turn we wipe the caption so we never display the running
+  // concatenation of every word the agent ever said.
+  const captionTurnRef = useRef<number | null>(null);
   useEffect(() => {
     refetchRef.current = refetch;
     navigateRef.current = navigate;
   });
 
-  // If the user already finished onboarding, bounce them to /home immediately.
+  // If a user lands on /voice-call when they've already onboarded — e.g. by
+  // refreshing the page or hitting Back — push them forward to the next
+  // logical step rather than restarting the conversation. Likewise, if they
+  // don't have a name yet (skipped or hit /voice-call directly), bounce
+  // them to /name first. Both only fire BEFORE any call starts so we never
+  // hijack the green-check confirmation mid-completion.
   useEffect(() => {
+    if (callState !== "idle") return;
     if (isOnboarded) {
-      navigate("/home", { replace: true });
+      navigate("/onboarding/permissions", { replace: true });
+      return;
     }
-  }, [isOnboarded, navigate]);
+    if (profile && !profile.name?.trim()) {
+      navigate("/onboarding/name", { replace: true });
+    }
+  }, [isOnboarded, callState, profile, navigate]);
 
   // Pre-load the Gradbot bundles so the user gesture handler can move
   // straight into player.start() without long awaits in between.
@@ -50,7 +70,7 @@ const VoiceCall = () => {
 
   const startCall = useCallback(async () => {
     if (!userId) return;
-    if (callState === "connecting" || callState === "live") return;
+    if (callState === "connecting" || callState === "live" || callState === "completed") return;
 
     setCallState("connecting");
     setShowSkip(false);
@@ -72,14 +92,36 @@ const VoiceCall = () => {
             if (cancelled) return;
             setCallState("live");
             setCaption("Hi! Let's get to know you a bit.");
+            captionTurnRef.current = null;
           },
-          onTranscript: ({ text, isUser }) => {
+          onTranscript: ({ text, turnIdx, isUser }) => {
             if (cancelled || isUser) return;
-            // Display the agent's words; user words are noisy on screen.
-            setCaption((prev) => (prev.endsWith(text) ? prev : `${prev} ${text}`.trim()));
+            // Display the agent's words only — user words are noisy here.
+            // Reset the caption when the agent starts a new turn so we
+            // don't show a growing wall of every sentence ever spoken.
+            setCaption((prev) => {
+              const isNewTurn = captionTurnRef.current !== turnIdx;
+              captionTurnRef.current = turnIdx;
+              if (isNewTurn) return text.trim();
+              const candidate = `${prev} ${text}`.trim();
+              // Hard cap at ~180 chars so a long sentence still fits 2-3
+              // lines on a phone screen — keep the tail (most recent words).
+              return candidate.length > 180 ? candidate.slice(-180) : candidate;
+            });
           },
           onEvent: (eventType, msg) => {
             console.debug("[voice] event", eventType, msg);
+            // Backend signals the save tool completed → flip to the green-
+            // check screen while the agent's final sentence plays out. The
+            // user manually taps "Next" to move on (no auto-redirect).
+            if (eventType === "onboarding_saved") {
+              if (cancelled) return;
+              setCallState("completed");
+              setCaption("Information saved");
+              refetchRef.current().catch(() => {
+                /* refetch best-effort — guards still let user proceed */
+              });
+            }
           },
           onLevel: ({ input, output }) => {
             if (cancelled) return;
@@ -91,14 +133,20 @@ const VoiceCall = () => {
           },
           onClose: async () => {
             if (cancelled) return;
+            // If the agent already saved (and we flipped to the completed
+            // screen), keep the user on it so they can tap Next. Otherwise
+            // refetch — if onboarded_at is set anyway, show completed; else
+            // surface the retry/skip UX.
             try {
               const result = await refetchRef.current();
-              if (result?.data?.onboarded_at) {
-                navigateRef.current("/onboarding/permissions", { replace: true });
+              const onboarded = Boolean(result?.data?.onboarded_at);
+              if (onboarded) {
+                setCallState("completed");
+                setCaption("Information saved");
                 return;
               }
             } catch {
-              /* fall through to skip UX */
+              /* fall through to retry UX */
             }
             setCallState("idle");
             setShowSkip(true);
@@ -135,6 +183,11 @@ const VoiceCall = () => {
       handleRef.current = null;
     };
   }, []);
+
+  const handleNext = () => {
+    handleRef.current?.close();
+    navigate("/onboarding/permissions", { replace: true });
+  };
 
   // Demo-mode safety: if the user keeps the screen open without ever
   // connecting, surface the skip button after a delay.
@@ -175,6 +228,7 @@ const VoiceCall = () => {
 
   const isLive = callState === "live";
   const isStarting = callState === "connecting";
+  const isCompleted = callState === "completed";
 
   return (
     <div className="min-h-screen bg-cream/40">
@@ -187,73 +241,107 @@ const VoiceCall = () => {
 
         <div className="px-6 pt-2">
           <div className="text-meta text-cream/80">
-            {isLive ? `LIVE · ${mm}:${ss}` : "INCOMING"}
+            {isCompleted ? "ALL DONE" : isLive ? `LIVE · ${mm}:${ss}` : "INCOMING"}
           </div>
           <h1 className="text-h1 font-medium mt-2">ketchup agent</h1>
           <p className="text-body mt-1 text-cream/90">
-            {isLive ? "Talking to your agent" : "Tap the mic to start"}
+            {isCompleted
+              ? "Got everything I need"
+              : isLive
+                ? "Talking to your agent"
+                : "Tap the mic to start"}
           </p>
         </div>
 
         <div className="flex-1 flex flex-col items-center justify-center px-8 gap-8">
-          <button
-            type="button"
-            onClick={startCall}
-            disabled={isStarting || isLive || !userId}
-            aria-label={isLive ? "Microphone active" : "Start call"}
-            className="w-32 h-32 rounded-full bg-cream flex items-center justify-center shadow-lg disabled:opacity-90 active:scale-95 transition-transform"
-          >
-            <Mic className="w-12 h-12 text-ketchup-red" strokeWidth={2} />
-          </button>
+          {isCompleted ? (
+            <div
+              className="w-32 h-32 rounded-full bg-mint flex items-center justify-center shadow-lg animate-in zoom-in duration-300"
+              aria-label="Information saved"
+            >
+              <Check className="w-16 h-16 text-navy" strokeWidth={3} />
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={startCall}
+              disabled={isStarting || isLive || !userId}
+              aria-label={isLive ? "Microphone active" : "Start call"}
+              className="w-32 h-32 rounded-full bg-cream flex items-center justify-center shadow-lg disabled:opacity-90 active:scale-95 transition-transform"
+            >
+              <Mic className="w-12 h-12 text-ketchup-red" strokeWidth={2} />
+            </button>
+          )}
 
-          <LiveLevels inputLevel={inputLevel} outputLevel={outputLevel} bars={18} className="h-12" />
-          <div className="flex items-center gap-4 text-meta text-cream/80">
-            <span>YOU</span>
-            <span className="opacity-60">·</span>
-            <span>AGENT</span>
-          </div>
+          {isCompleted ? null : (
+            <>
+              <LiveLevels
+                inputLevel={inputLevel}
+                outputLevel={outputLevel}
+                bars={18}
+                className="h-12"
+              />
+              <div className="flex items-center gap-4 text-meta text-cream/80">
+                <span>YOU</span>
+                <span className="opacity-60">·</span>
+                <span>AGENT</span>
+              </div>
+            </>
+          )}
 
           <p className="text-body italic text-cream text-center max-w-[280px] leading-relaxed">
-            "{caption}"
+            {isCompleted ? "Information saved." : `"${caption}"`}
           </p>
         </div>
 
-        <div className="px-8 pb-10 flex items-center justify-between">
-          <button
-            type="button"
-            className="w-12 h-12 rounded-full bg-cream/20 flex items-center justify-center text-cream"
-            aria-label="Mute microphone"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path
-                d="M3 3l18 18M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.94-.6M19 10v2a7 7 0 0 1-.11 1.23M5 10v2a7 7 0 0 0 12 5"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-
-          {showSkip ? (
+        <div className="px-8 pb-10 flex items-center justify-between min-h-[64px]">
+          {isCompleted ? (
             <button
               type="button"
-              onClick={handleSkip}
-              className="rounded-pill bg-navy text-cream px-4 h-12 text-body font-medium"
+              onClick={handleNext}
+              className="w-full h-14 rounded-pill bg-mint text-navy text-h3 font-semibold shadow-lg active:scale-[0.99] transition-transform"
             >
-              Skip onboarding (demo)
+              Next
             </button>
-          ) : null}
+          ) : (
+            <>
+              <button
+                type="button"
+                className="w-12 h-12 rounded-full bg-cream/20 flex items-center justify-center text-cream"
+                aria-label="Mute microphone"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M3 3l18 18M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.94-.6M19 10v2a7 7 0 0 1-.11 1.23M5 10v2a7 7 0 0 0 12 5"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
 
-          <button
-            type="button"
-            onClick={handleEnd}
-            disabled={!isLive}
-            className="w-14 h-14 rounded-full bg-navy text-cream flex items-center justify-center disabled:opacity-50"
-            aria-label="End call"
-          >
-            <X className="w-6 h-6" strokeWidth={2.5} />
-          </button>
+              {showSkip ? (
+                <button
+                  type="button"
+                  onClick={handleSkip}
+                  className="rounded-pill bg-navy text-cream px-4 h-12 text-body font-medium"
+                >
+                  Skip onboarding (demo)
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={handleEnd}
+                disabled={!isLive}
+                className="w-14 h-14 rounded-full bg-navy text-cream flex items-center justify-center disabled:opacity-50"
+                aria-label="End call"
+              >
+                <X className="w-6 h-6" strokeWidth={2.5} />
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

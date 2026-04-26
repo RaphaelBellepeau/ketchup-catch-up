@@ -133,7 +133,10 @@ function rms(analyser: AnalyserNode, buffer: Uint8Array): number {
     const v = (buffer[i] - 128) / 128; // -1..1
     sumSq += v * v;
   }
-  return Math.min(1, Math.sqrt(sumSq / buffer.length) * 2);
+  // Boost the visual gain so casual speech reads visibly on the meter.
+  // The signal SENT to Gradium is unaffected — this only scales the
+  // RMS that drives the on-screen bars.
+  return Math.min(1, Math.sqrt(sumSq / buffer.length) * 6);
 }
 
 /**

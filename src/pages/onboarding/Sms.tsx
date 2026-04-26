@@ -26,7 +26,7 @@ const Sms = () => {
   const location = useLocation();
   const phone = (location.state as { phone?: string } | null)?.phone ?? "";
 
-  const { session, isOnboarded, loading: profileLoading } = useProfile();
+  const { session, profile, isOnboarded, loading: profileLoading } = useProfile();
 
   const [digits, setDigits] = useState<string[]>(() => Array(CODE_LENGTH).fill(""));
   const [seconds, setSeconds] = useState(RESEND_SECONDS);
@@ -34,11 +34,17 @@ const Sms = () => {
   const inputsRef = useRef<Array<HTMLInputElement | null>>([]);
 
   // If we already have a Supabase session (e.g. page refresh after verify),
-  // skip the OTP form and route based on onboarding status.
+  // skip the OTP form and forward to the appropriate onboarding step.
   useEffect(() => {
     if (profileLoading || !session) return;
-    navigate(isOnboarded ? "/home" : "/onboarding/voice-call", { replace: true });
-  }, [profileLoading, session, isOnboarded, navigate]);
+    if (isOnboarded) {
+      navigate("/home", { replace: true });
+    } else if (!profile?.name?.trim()) {
+      navigate("/onboarding/name", { replace: true });
+    } else {
+      navigate("/onboarding/voice-call", { replace: true });
+    }
+  }, [profileLoading, session, profile?.name, isOnboarded, navigate]);
 
   // No phone in route state and no session → user landed here directly.
   // Send them back to /welcome to enter their number.
@@ -127,7 +133,9 @@ const Sms = () => {
       if (error) throw error;
       const userId = data.user?.id;
       if (!userId) throw new Error("No user returned");
-      navigate("/onboarding/voice-call", { state: { userId, phone } });
+      // First-time SMS verify always lands on /name — the redirect effect
+      // above will skip ahead automatically if a profile name already exists.
+      navigate("/onboarding/name", { state: { userId, phone } });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Invalid code";
       toast({ title: "Verification failed", description: message, variant: "destructive" });

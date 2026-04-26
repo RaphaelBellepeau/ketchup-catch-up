@@ -8,6 +8,7 @@ import { RequireOnboarded } from "@/components/RequireOnboarded";
 import NotFound from "./pages/NotFound.tsx";
 import Welcome from "./pages/onboarding/Welcome.tsx";
 import Sms from "./pages/onboarding/Sms.tsx";
+import Name from "./pages/onboarding/Name.tsx";
 import VoiceCall from "./pages/onboarding/VoiceCall.tsx";
 import Permissions from "./pages/onboarding/Permissions.tsx";
 import Friends from "./pages/groups/Friends.tsx";
@@ -37,7 +38,17 @@ const App = () => (
           <Route path="/onboarding/welcome" element={<Welcome />} />
           <Route path="/onboarding/sms" element={<Sms />} />
 
-          {/* Voice onboarding — needs a session, but NOT yet completed onboarding. */}
+          {/* Name + Voice onboarding — both need a session but not yet
+              completed onboarding. The pages themselves chain forwards if
+              the user has already passed that step. */}
+          <Route
+            path="/onboarding/name"
+            element={
+              <RequireAuth>
+                <Name />
+              </RequireAuth>
+            }
+          />
           <Route
             path="/onboarding/voice-call"
             element={

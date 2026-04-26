@@ -1,6 +1,9 @@
+import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { format, differenceInCalendarDays } from "date-fns";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/Button";
+import { Calendar } from "@/components/ui/calendar";
 import { useGroupCreation, type Vibe } from "@/store/groupCreation";
 import { cn } from "@/lib/utils";
 
@@ -19,17 +22,42 @@ const launchAgent = async (payload: unknown): Promise<{ catchup_id: string }> =>
   return { catchup_id: `catchup-${Math.random().toString(36).slice(2, 8)}` };
 };
 
+function formatDate(d: Date | null): string {
+  return d ? format(d, "EEE d MMM") : "—";
+}
+
 const WindowPage = () => {
   const navigate = useNavigate();
   const state = useGroupCreation();
 
+  const today = useMemo(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }, []);
+
+  const range = useMemo(
+    () => ({
+      from: state.fromDate ?? undefined,
+      to: state.untilDate ?? undefined,
+    }),
+    [state.fromDate, state.untilDate],
+  );
+
+  const dayCount =
+    state.fromDate && state.untilDate
+      ? differenceInCalendarDays(state.untilDate, state.fromDate) + 1
+      : 0;
+
+  const hasValidRange = Boolean(state.fromDate && state.untilDate);
+
   const handleLaunch = async () => {
+    if (!hasValidRange) return;
     const { catchup_id } = await launchAgent({
       name: state.name,
       friends: state.selectedFriendIds,
       frequency: state.frequency,
-      from: state.fromDate,
-      until: state.untilDate,
+      from: state.fromDate?.toISOString(),
+      until: state.untilDate?.toISOString(),
       vibe: state.vibe,
     });
     navigate("/catchup/negotiating", { state: { catchupId: catchup_id } });
@@ -38,21 +66,45 @@ const WindowPage = () => {
   return (
     <Layout>
       <div className="flex-1 flex flex-col px-6 pt-4 pb-6">
-        <div className="text-meta text-slate">WHEN & WHAT</div>
-        <h1 className="text-h1 text-navy mt-2">In the next 2 weeks</h1>
+        <div className="text-meta text-slate">NEW GROUP · 4 OF 4</div>
+        <h1 className="text-h1 text-navy mt-2">When do you want to meet?</h1>
+        <p className="text-body text-slate mt-2">
+          Tap a start day, then an end day. Your agent will negotiate inside this window.
+        </p>
 
+        {/* Selected range summary */}
         <div className="mt-4 grid grid-cols-2 gap-3">
           <div className="rounded-card bg-mint p-4">
             <div className="text-meta text-navy/70">From</div>
-            <div className="text-h2 text-navy mt-1">{state.fromDate}</div>
+            <div className="text-h2 text-navy mt-1">{formatDate(state.fromDate)}</div>
           </div>
           <div className="rounded-card bg-blush p-4">
             <div className="text-meta text-navy/70">Until</div>
-            <div className="text-h2 text-navy mt-1">{state.untilDate}</div>
+            <div className="text-h2 text-navy mt-1">{formatDate(state.untilDate)}</div>
           </div>
         </div>
+        {hasValidRange && (
+          <div className="mt-2 text-meta text-slate">
+            {dayCount} {dayCount === 1 ? "day" : "days"} window
+          </div>
+        )}
 
-        <div className="mt-6 border-t border-light-gray pt-4">
+        {/* Inline calendar */}
+        <div className="mt-3 rounded-card bg-white border border-light-gray flex justify-center">
+          <Calendar
+            mode="range"
+            selected={range}
+            onSelect={(r) =>
+              state.setWindow(r?.from ?? null, r?.to ?? null)
+            }
+            numberOfMonths={1}
+            disabled={{ before: today }}
+            weekStartsOn={1}
+          />
+        </div>
+
+        {/* Vibe */}
+        <div className="mt-5 border-t border-light-gray pt-4">
           <div className="text-meta text-slate">WHAT KIND OF MOMENT</div>
           <div className="mt-3 flex flex-wrap gap-2">
             {vibes.map((v) => {
@@ -79,7 +131,13 @@ const WindowPage = () => {
 
         <div className="flex-1" />
 
-        <Button variant="primary" size="lg" fullWidth onClick={handleLaunch}>
+        <Button
+          variant="primary"
+          size="lg"
+          fullWidth
+          onClick={handleLaunch}
+          disabled={!hasValidRange}
+        >
           Launch my agent
         </Button>
       </div>

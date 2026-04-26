@@ -7,24 +7,35 @@ interface GroupCreationState {
   selectedFriendIds: string[];
   name: string;
   frequency: Frequency;
-  fromDate: string; // human-readable for now
-  untilDate: string;
+  /** Inclusive start of the meet-up window. */
+  fromDate: Date | null;
+  /** Inclusive end of the meet-up window. */
+  untilDate: Date | null;
   vibe: Vibe;
 
   toggleFriend: (id: string) => void;
   setName: (n: string) => void;
   setFrequency: (f: Frequency) => void;
   setVibe: (v: Vibe) => void;
-  setWindow: (from: string, until: string) => void;
+  setWindow: (from: Date | null, until: Date | null) => void;
   reset: () => void;
 }
 
+function defaultRange(): { fromDate: Date; untilDate: Date } {
+  const now = new Date();
+  const from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const until = new Date(from);
+  until.setDate(until.getDate() + 14);
+  return { fromDate: from, untilDate: until };
+}
+
+const { fromDate: defaultFrom, untilDate: defaultUntil } = defaultRange();
 const defaults = {
   selectedFriendIds: [] as string[],
   name: "The classics",
   frequency: "one-shot" as Frequency,
-  fromDate: "Mon 27 Apr",
-  untilDate: "Sun 11 May",
+  fromDate: defaultFrom as Date | null,
+  untilDate: defaultUntil as Date | null,
   vibe: "dinner" as Vibe,
 };
 
