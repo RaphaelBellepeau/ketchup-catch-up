@@ -15,6 +15,7 @@ import Friends from "./pages/groups/Friends.tsx";
 import NameGroup from "./pages/groups/NameGroup.tsx";
 import FrequencyPage from "./pages/groups/FrequencyPage.tsx";
 import WindowPage from "./pages/groups/WindowPage.tsx";
+import Recurring from "./pages/groups/Recurring.tsx";
 import Negotiating from "./pages/catchup/Negotiating.tsx";
 import Proposal from "./pages/catchup/Proposal.tsx";
 import Confirmed from "./pages/catchup/Confirmed.tsx";
@@ -96,6 +97,22 @@ const App = () => (
             element={
               <RequireOnboarded>
                 <WindowPage />
+              </RequireOnboarded>
+            }
+          />
+          <Route
+            path="/groups/new/recurring"
+            element={
+              <RequireOnboarded>
+                <Recurring />
+              </RequireOnboarded>
+            }
+          />
+          <Route
+            path="/groups/:groupId/recurring"
+            element={
+              <RequireOnboarded>
+                <Recurring />
               </RequireOnboarded>
             }
           />

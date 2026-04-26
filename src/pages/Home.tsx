@@ -196,7 +196,7 @@ const Home = () => {
               <button
                 key={g.id}
                 type="button"
-                onClick={() => console.log("Open group:", g.id)}
+                onClick={() => navigate(`/groups/${g.id}/recurring`)}
                 className="bg-white border border-light-gray rounded-card p-4 flex items-center justify-between transition-transform active:scale-[0.99]"
               >
                 <div className="text-left min-w-0 flex-1">

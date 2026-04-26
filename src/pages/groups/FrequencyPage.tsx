@@ -59,7 +59,11 @@ const FrequencyPage = () => {
           variant="primary"
           size="lg"
           fullWidth
-          onClick={() => navigate("/groups/new/window")}
+          onClick={() =>
+            navigate(
+              frequency === "recurring" ? "/groups/new/recurring" : "/groups/new/window",
+            )
+          }
         >
           Continue
         </Button>
