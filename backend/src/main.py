@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from src.config import settings
 from src.routers import auth, catchups, feedbacks, friends, groups, memories, users
+from src.routers import demo
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ app.include_router(groups.router)
 app.include_router(catchups.router)
 app.include_router(memories.router)
 app.include_router(feedbacks.router)
+app.include_router(demo.router)
 
 
 # ── Health ─────────────────────────────────────────────

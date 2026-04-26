@@ -31,7 +31,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Navigate to="/onboarding/welcome" replace />} />
+          <Route path="/" element={<Navigate to="/catchup/negotiating" replace />} />
 
           {/* Public — Welcome and Sms self-redirect when a session is present. */}
           <Route path="/onboarding/welcome" element={<Welcome />} />
@@ -90,27 +90,15 @@ const App = () => (
           />
           <Route
             path="/catchup/negotiating"
-            element={
-              <RequireOnboarded>
-                <Negotiating />
-              </RequireOnboarded>
-            }
+            element={<Negotiating />}
           />
           <Route
             path="/catchup/proposal"
-            element={
-              <RequireOnboarded>
-                <Proposal />
-              </RequireOnboarded>
-            }
+            element={<Proposal />}
           />
           <Route
             path="/catchup/confirmed"
-            element={
-              <RequireOnboarded>
-                <Confirmed />
-              </RequireOnboarded>
-            }
+            element={<Confirmed />}
           />
           <Route
             path="/feedback/rating"
