@@ -49,6 +49,147 @@ Everything streams in real time over SSE: the user can watch the agents
 debate, see who's flexing on which slot, and see Tavily go look for
 places.
 
+## Architecture
+
+Two services on Cloud Run: an nginx-served React SPA and a FastAPI
+backend. The backend owns three concerns: a thin REST/SSE layer over
+Supabase, an in-process multi-agent negotiator built around Gemini Flash
+and Tavily, and a Gradbot-backed voice WebSocket for onboarding and
+post-event debriefs.
+
+Privacy is enforced by **separation, not by prompt instruction**. Each
+per-user agent reads its own user's Google Calendar free/busy *privately*
+before proposing slots, and only ever shares structured summaries with
+the orchestrator. The orchestrator never sees raw events, raw memories,
+or any other user's calendar. It only sees "agent X prefers Thursday
+20:00 because of these constraints."
+
+Voice runs through **Gradbot**, an open-source framework for vibecoding
+and prototyping voice agents on top of Gradium's STT/LLM/TTS APIs.
+Gradbot's WebSocket transport is OpenAI Realtime API compatible and
+also speaks the Twilio protocol, which is what makes it pluggable
+between a browser worklet (us) and a phone call (future work).
+
+### System overview
+
+```mermaid
+flowchart TB
+    subgraph Browser["🌐 Browser (React SPA)"]
+        UI["Pages<br/>onboarding · groups · catchup · feedback · home"]
+        Hooks["TanStack Query hooks<br/>useProfile · useCatchups · useGroups · useMemories"]
+        Voice["voiceClient.ts<br/>(Gradbot worklet)"]
+        Store["Zustand store<br/>(group-creation flow)"]
+        UI --> Hooks
+        UI --> Voice
+        UI --> Store
+    end
+
+    subgraph CloudRun["☁️ Google Cloud Run"]
+        direction TB
+        Frontend["catchup-frontend<br/>(nginx · Vite build<br/>+ vendored Gradbot worklets)"]
+
+        subgraph Backend["catchup-backend (FastAPI · uv · py3.12)"]
+            direction TB
+            Routers["Routers<br/>auth · users · friends · groups<br/>catchups · memories · feedbacks · calendar"]
+            Agents["agents/<br/>negotiation orchestrator<br/>user_agent · prompts · tools"]
+            LLMProxy["llm_proxy.py<br/>(Gemini → OpenAI SSE patcher)"]
+            VoiceSvc["voice/ + Gradbot runtime<br/>tasks · service · persist"]
+            Services["services/<br/>supabase_client · gcal_client"]
+            Routers --> Agents
+            Routers --> Services
+            Agents --> LLMProxy
+            Agents --> Services
+            VoiceSvc --> Services
+        end
+    end
+
+    subgraph External["External services"]
+        direction TB
+        Supabase[("Supabase<br/>Auth · Postgres · RLS")]
+        Twilio["Twilio<br/>SMS OTP"]
+        GCal["Google Calendar API<br/>per-user free/busy (read)<br/>+ events (write)"]
+        Tavily["Tavily<br/>venue search"]
+        Gemini["Gemini 2.5 Flash<br/>OpenAI-compatible endpoint"]
+        Gradium["Gradium APIs<br/>STT · LLM · TTS"]
+    end
+
+    Browser -- "REST /api/*" --> Routers
+    Browser -- "SSE /catchups/:id/negotiate/stream" --> Routers
+    Voice -- "WS /ws/voice/{task}/{user}" --> VoiceSvc
+    Browser -- "Supabase JS SDK<br/>(auth · realtime)" --> Supabase
+    Browser -. "static assets" .-> Frontend
+
+    Supabase -. "phone OTP" .-> Twilio
+    Services -- "REST" --> Supabase
+    Services -- "OAuth · free/busy (per agent, private)<br/>events (on accept)" --> GCal
+    Agents -- "tool: search" --> Tavily
+    LLMProxy -- "HTTPS streaming" --> Gemini
+    VoiceSvc -- "WS transport<br/>(OpenAI Realtime API / Twilio protocol)" --> Gradium
+    Gradium -- "LLM calls" --> Gemini
+```
+
+### A2A negotiation sequence
+
+The heart of the product: when a user launches a catch-up, the backend
+spawns one agent per group member, runs up to three rounds of
+proposal/counter, streams each turn to the UI over SSE, and locks a
+proposal once the orchestrator finds consensus. Rejection restarts the
+loop with the rejection reason injected into every agent's system prompt
+so the failure mode is actively avoided.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant FE as Frontend
+    participant API as FastAPI
+    participant Orch as Orchestrator
+    participant Ag as N × User-Agents<br/>(Gemini Flash)
+    participant Tv as Tavily
+    participant DB as Supabase
+    participant GC as Google Calendar
+
+    U->>FE: Pick group, vibe, window
+    FE->>API: POST /catchups/:id/negotiate
+    API->>DB: load members + per-user memories
+    API->>Orch: spawn negotiation
+    Orch->>Ag: spawn one agent per member<br/>(only sees its own user's data)
+
+    par Per agent, privately
+        Ag->>GC: read this user's free/busy<br/>(scoped to the window)
+        GC-->>Ag: busy slots
+    end
+
+    loop Up to 3 rounds
+        Ag->>Ag: propose / counter slots<br/>(informed by own calendar + memories)
+        Ag->>Tv: venue search (advanced)
+        Tv-->>Ag: results
+        Ag->>Ag: LLM venue extraction<br/>(real names out of listicles)
+        Ag->>Orch: structured summary<br/>(no raw events leak)
+        Orch->>DB: append negotiation_messages
+        DB-->>FE: SSE stream → live feed
+    end
+
+    Orch->>DB: write proposal
+    FE-->>U: show Proposal screen
+
+    alt All members accept
+        FE->>API: POST /catchups/:id/vote (accept)
+        API->>GC: create event for each connected member
+        API->>DB: status = confirmed
+    else Any member rejects
+        FE->>API: POST /catchups/:id/vote (reject + reason)
+        API->>Orch: restart with reason injected<br/>into agent system prompts
+    end
+
+    Note over U,GC: After the event…
+    U->>FE: opens app → "Incoming · your agent" card
+    FE->>API: WS /ws/voice/feedback/:user?catchup_id=…
+    API->>DB: load catchup + proposal + memories
+    API->>Ag: Gradbot session (Emma voice)
+    Ag->>DB: persist refined memories
+```
+
 ## Built for the Build Berlin hackathon
 
 We ran on the four official partner stacks:
